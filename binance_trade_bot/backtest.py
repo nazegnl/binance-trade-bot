@@ -71,11 +71,11 @@ class MockBinanceManager(BinanceAPIManager):
             val = cache.get(key, None)
         return val
 
-    def get_currency_balance(self, currency_symbol: str):
+    def get_full_balance(self):
         """
-        Get balance of a specific coin
+        Get full balance of the current account
         """
-        return self.balances.get(currency_symbol, 0)
+        return self.balances
 
     def buy_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers):
         origin_symbol = origin_coin.symbol
@@ -174,7 +174,7 @@ def backtest(
     manager = MockBinanceManager(config, db, logger, start_date, start_balances)
 
     starting_coin = db.get_coin(starting_coin or config.SUPPORTED_COIN_LIST[0])
-    if manager.get_currency_balance(starting_coin.symbol) == 0:
+    if not manager.get_currency_balance(starting_coin.symbol):
         manager.buy_alt(starting_coin, config.BRIDGE, manager.get_all_market_tickers())
     db.set_current_coin(starting_coin)
 
