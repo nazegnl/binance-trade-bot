@@ -20,7 +20,6 @@ class Database:
         self.logger = logger
         self.config = config
         self.engine = create_engine(uri)
-        self.SessionMaker = sessionmaker(bind=self.engine)
         self.socketio_client = Client()
 
     def socketio_connect(self):
@@ -40,10 +39,16 @@ class Database:
         """
         Creates a context with an open SQLAlchemy session.
         """
-        session: Session = scoped_session(self.SessionMaker)
-        yield session
-        session.commit()
-        session.close()
+        session: Session = Session(bind=self.engine)
+
+        try:
+            yield session
+            session.commit()
+        except:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def set_coins(self, symbols: List[str]):
         session: Session
