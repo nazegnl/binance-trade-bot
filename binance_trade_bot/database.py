@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .config import Config
 from .logger import Logger
 from .models import *  # pylint: disable=wildcard-import
+from .time_logger import stopwatch
 
 
 class Database:
@@ -133,6 +134,7 @@ class Database:
             session.expunge_all()
             return pairs
 
+    @stopwatch
     def log_scout(
         self,
         pair: Pair,
