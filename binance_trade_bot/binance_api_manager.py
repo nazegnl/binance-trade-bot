@@ -63,8 +63,8 @@ class BinanceAPIManager:
         Get full balance of the current account
         """
         return {
-            currency_balance["asset"]: float(currency_balance.get("free", 0)) for currency_balance in
-            self.binance_client.get_account()["balances"]
+            currency_balance["asset"]: float(currency_balance.get("free", 0))
+            for currency_balance in self.binance_client.get_account()["balances"]
             if currency_balance["asset"]
         }
 
@@ -208,6 +208,10 @@ class BinanceAPIManager:
         from_coin_price = all_tickers.get_price(origin_symbol + target_symbol)
 
         order_quantity = self._buy_quantity(origin_symbol, target_symbol, target_balance, from_coin_price)
+
+        if order_quantity * from_coin_price < self.get_min_notional(origin_symbol, target_symbol):
+            return None
+
         self.logger.info(f"BUY QTY {order_quantity}")
 
         # Try to buy until successful
@@ -268,7 +272,7 @@ class BinanceAPIManager:
         while order is None:
             # Should sell at calculated price to avoid lost coin
             order = self.binance_client.order_limit_sell(
-                symbol=origin_symbol + target_symbol, quantity=(order_quantity), price=from_coin_price
+                symbol=origin_symbol + target_symbol, quantity=order_quantity, price=from_coin_price
             )
 
         self.logger.info("order")

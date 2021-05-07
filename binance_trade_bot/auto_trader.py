@@ -45,6 +45,7 @@ class AutoTrader:
             return result
 
         self.logger.info("Couldn't buy, going back to scouting mode...")
+        self.db.set_current_coin(pair.from_coin)
         return None
 
     def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
