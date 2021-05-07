@@ -1,12 +1,9 @@
 import json
 import os
-import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Union
 
-from socketio import Client
-from socketio.exceptions import ConnectionError as SocketIOConnectionError
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
@@ -20,19 +17,6 @@ class Database:
         self.logger = logger
         self.config = config
         self.engine = create_engine(uri)
-        self.socketio_client = Client()
-
-    def socketio_connect(self):
-        if self.socketio_client.connected and self.socketio_client.namespaces:
-            return True
-        try:
-            if not self.socketio_client.connected:
-                self.socketio_client.connect("http://api:5123", namespaces=["/backend"])
-            while not self.socketio_client.connected or not self.socketio_client.namespaces:
-                time.sleep(0.1)
-            return True
-        except SocketIOConnectionError:
-            return False
 
     @contextmanager
     def db_session(self):
@@ -108,7 +92,6 @@ class Database:
                 coin = session.merge(coin)
             cc = CurrentCoin(coin)
             session.add(cc)
-            self.send_update(cc)
 
     def get_current_coin(self) -> Optional[Coin]:
         session: Session
@@ -162,7 +145,6 @@ class Database:
             pair = session.merge(pair)
             sh = ScoutHistory(pair, target_ratio, current_coin_price, other_coin_price)
             session.add(sh)
-            self.send_update(sh)
 
     def prune_scout_history(self):
         time_diff = datetime.now() - timedelta(hours=self.config.SCOUT_HISTORY_PRUNE_TIME)
@@ -222,16 +204,6 @@ class Database:
     def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool):
         return TradeLog(self, from_coin, to_coin, selling)
 
-    def send_update(self, model):
-        if not self.socketio_connect():
-            return
-
-        self.socketio_client.emit(
-            "update",
-            {"table": model.__tablename__, "data": model.info()},
-            namespace="/backend",
-        )
-
     def migrate_old_state(self):
         """
         For migrating from old dotfile format to SQL db. This method should be removed in
@@ -274,7 +246,6 @@ class TradeLog:
             session.add(self.trade)
             # Flush so that SQLAlchemy fills in the id column
             session.flush()
-            self.db.send_update(self.trade)
 
     def set_ordered(self, alt_starting_balance, crypto_starting_balance, alt_trade_amount):
         session: Session
@@ -284,7 +255,6 @@ class TradeLog:
             trade.alt_trade_amount = alt_trade_amount
             trade.crypto_starting_balance = crypto_starting_balance
             trade.state = TradeState.ORDERED
-            self.db.send_update(trade)
 
     def set_complete(self, crypto_trade_amount):
         session: Session
@@ -292,7 +262,6 @@ class TradeLog:
             trade: Trade = session.merge(self.trade)
             trade.crypto_trade_amount = crypto_trade_amount
             trade.state = TradeState.COMPLETE
-            self.db.send_update(trade)
 
 
 if __name__ == "__main__":
