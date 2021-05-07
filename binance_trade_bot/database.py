@@ -142,7 +142,6 @@ class Database:
             session.expunge_all()
             return pairs
 
-    @stopwatch
     def log_scout(self, scouts: List[ScoutLog]):
         session: Session
         with self.db_session() as session:
