@@ -13,6 +13,14 @@ from .models import *  # pylint: disable=wildcard-import
 from .time_logger import stopwatch
 
 
+class ScoutLog:
+    def __init__(self, pair: Pair, target_ratio: float, current_coin_price: float, other_coin_price: float):
+        self.target_ratio = target_ratio
+        self.pair = pair
+        self.current_coin_price = current_coin_price
+        self.other_coin_price = other_coin_price
+
+
 class Database:
     def __init__(self, logger: Logger, config: Config, uri="sqlite:///data/crypto_trading.db"):
         self.logger = logger
@@ -135,18 +143,13 @@ class Database:
             return pairs
 
     @stopwatch
-    def log_scout(
-        self,
-        pair: Pair,
-        target_ratio: float,
-        current_coin_price: float,
-        other_coin_price: float,
-    ):
+    def log_scout(self, scouts: List[ScoutLog]):
         session: Session
         with self.db_session() as session:
-            pair = session.merge(pair)
-            sh = ScoutHistory(pair, target_ratio, current_coin_price, other_coin_price)
-            session.add(sh)
+            for log in scouts:
+                merged_pair = session.merge(log.pair)
+                sh = ScoutHistory(merged_pair, log.target_ratio, log.current_coin_price, log.other_coin_price)
+                session.add(sh)
 
     def prune_scout_history(self):
         time_diff = datetime.now() - timedelta(hours=self.config.SCOUT_HISTORY_PRUNE_TIME)

@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 from traceback import format_exc
-from typing import Dict
+from typing import Dict, List
 
 from sqlitedict import SqliteDict
 
 from .binance_api_manager import AllTickers, BinanceAPIManager
 from .config import Config
-from .database import Database
+from .database import Database, ScoutLog
 from .logger import Logger
 from .models import Coin, Pair
 from .strategies import get_strategy
@@ -138,7 +138,7 @@ class MockDatabase(Database):
     def __init__(self, logger: Logger, config: Config):
         super().__init__(logger, config, "sqlite:///")
 
-    def log_scout(self, pair: Pair, target_ratio: float, current_coin_price: float, other_coin_price: float):
+    def log_scout(self, scouts: List[ScoutLog]):
         pass
 
 

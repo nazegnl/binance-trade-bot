@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .binance_api_manager import AllTickers, BinanceAPIManager
 from .config import Config
-from .database import Database
+from .database import Database, ScoutLog
 from .logger import Logger
 from .models import Coin, CoinValue, Pair
 
@@ -109,7 +109,7 @@ class AutoTrader:
         Given a coin, get the current price ratio for every other enabled coin
         """
         ratio_dict: Dict[Pair, float] = {}
-
+        scouts = []
         for pair in self.db.get_pairs_from(coin):
             optional_coin_price = all_tickers.get_price(pair.to_coin + self.config.BRIDGE)
 
@@ -119,12 +119,14 @@ class AutoTrader:
                 )
                 continue
 
-            self.db.log_scout(pair, pair.ratio, coin_price, optional_coin_price)
+            scouts.append(ScoutLog(pair, pair.ratio, coin_price, optional_coin_price))
 
             # Obtain (current coin)/(optional coin)
             coin_opt_coin_ratio = coin_price / optional_coin_price
 
             ratio_dict[pair] = (coin_opt_coin_ratio - 0.0095 * coin_opt_coin_ratio) - pair.ratio
+
+        self.db.log_scout(scouts)
         return ratio_dict
 
     def _jump_to_best_coin(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
