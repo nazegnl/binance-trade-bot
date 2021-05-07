@@ -40,7 +40,7 @@ class BinanceAPIManager:
     def get_using_bnb_for_fees(self):
         return self.binance_client.get_bnb_burn_spot_margin()["spotBNBBurn"]
 
-    def get_fee(self, origin_coin: Coin, target_coin: Coin, selling: bool):
+    def get_fee(self):
         return 0.00075
 
     def get_all_market_tickers(self) -> AllTickers:
@@ -53,10 +53,8 @@ class BinanceAPIManager:
         """
         Get ticker price of a specific coin
         """
-        for ticker in self.binance_client.get_symbol_ticker():
-            if ticker["symbol"] == ticker_symbol:
-                return float(ticker["price"])
-        return None
+        price = self.binance_client.get_symbol_ticker(symbol=ticker_symbol)
+        return float(price["price"]) if price else None
 
     def get_full_balance(self):
         """
@@ -161,12 +159,7 @@ class BinanceAPIManager:
 
     def _should_cancel_order(self, order_status):
         minutes = (time.time() - order_status["time"] / 1000) / 60
-        timeout = 0
-
-        if order_status["side"] == "SELL":
-            timeout = float(self.config.SELL_TIMEOUT)
-        else:
-            timeout = float(self.config.BUY_TIMEOUT)
+        timeout = float(self.config.SELL_TIMEOUT) if order_status["side"] == "SELL" else float(self.config.BUY_TIMEOUT)
 
         if timeout and minutes > timeout and order_status["status"] == "NEW":
             return True
@@ -177,7 +170,7 @@ class BinanceAPIManager:
 
             if order_status["side"] == "BUY":
                 current_price = self.get_market_ticker_price(order_status["symbol"])
-                if float(current_price) * (1 - 0.001) > float(order_status["price"]):
+                if float(current_price) * (1 - 0.00075) > float(order_status["price"]):
                     return True
 
         return False
@@ -271,17 +264,18 @@ class BinanceAPIManager:
         order = None
         while order is None:
             # Should sell at calculated price to avoid lost coin
-            order = self.binance_client.order_limit_sell(
-                symbol=origin_symbol + target_symbol, quantity=order_quantity, price=from_coin_price
-            )
-
-        self.logger.info("order")
-        self.logger.info(order)
+            try:
+                order = self.binance_client.order_limit_sell(
+                    symbol=origin_symbol + target_symbol, quantity=order_quantity, price=from_coin_price
+                )
+                self.logger.info(order)
+            except BinanceAPIException as e:
+                self.logger.info(e)
+                time.sleep(1)
+            except Exception as e:  # pylint: disable=broad-except
+                self.logger.info(f"Unexpected Error: {e}")
 
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
-
-        # Binance server can take some time to save the order
-        self.logger.info("Waiting for Binance")
 
         stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
 

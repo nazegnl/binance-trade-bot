@@ -8,7 +8,7 @@ from .binance_api_manager import AllTickers, BinanceAPIManager
 from .config import Config
 from .database import Database, ScoutLog
 from .logger import Logger
-from .models import Coin, Pair
+from .models import Coin
 from .strategies import get_strategy
 
 cache = SqliteDict("data/backtest_cache.db")
@@ -45,8 +45,8 @@ class MockBinanceManager(BinanceAPIManager):
         """
         return FakeAllTickers(self)
 
-    def get_fee(self, origin_coin: Coin, target_coin: Coin, selling: bool):
-        return 0.0075
+    def get_fee(self):
+        return 0.00075
 
     def get_market_ticker_price(self, ticker_symbol: str):
         """
@@ -87,9 +87,7 @@ class MockBinanceManager(BinanceAPIManager):
         order_quantity = self._buy_quantity(origin_symbol, target_symbol, target_balance, from_coin_price)
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] -= target_quantity
-        self.balances[origin_symbol] = self.balances.get(origin_symbol, 0) + order_quantity * (
-            1 - self.get_fee(origin_coin, target_coin, False)
-        )
+        self.balances[origin_symbol] = self.balances.get(origin_symbol, 0) + order_quantity * (1 - self.get_fee())
         self.logger.info(
             f"Bought {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
             f"{self.balances[target_symbol]}"
@@ -105,9 +103,7 @@ class MockBinanceManager(BinanceAPIManager):
 
         order_quantity = self._sell_quantity(origin_symbol, target_symbol, origin_balance)
         target_quantity = order_quantity * from_coin_price
-        self.balances[target_symbol] = self.balances.get(target_symbol, 0) + target_quantity * (
-            1 - self.get_fee(origin_coin, target_coin, True)
-        )
+        self.balances[target_symbol] = self.balances.get(target_symbol, 0) + target_quantity * (1 - self.get_fee())
         self.balances[origin_symbol] -= order_quantity
         self.logger.info(
             f"Sold {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from .config import Config
 from .logger import Logger
 from .models import *  # pylint: disable=wildcard-import
-from .time_logger import stopwatch
 
 
 class ScoutLog:
