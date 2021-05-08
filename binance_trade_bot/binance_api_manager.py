@@ -1,6 +1,6 @@
 import math
 import time
-from typing import Dict, List
+from typing import Dict, List, Tuple, Union, Optional, Any
 
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -34,11 +34,11 @@ class BinanceAPIManager:
 
     @cached(cache=TTLCache(maxsize=1, ttl=43200))
     def get_trade_fees(self) -> Dict[str, float]:
-        return {ticker["symbol"]: ticker["taker"] for ticker in self.binance_client.get_trade_fee()["tradeFee"]}
+        return {ticker["symbol"]: ticker["taker"] for ticker in self.retry(self.binance_client.get_trade_fee)["tradeFee"]}
 
     @cached(cache=TTLCache(maxsize=1, ttl=60))
     def get_using_bnb_for_fees(self):
-        return self.binance_client.get_bnb_burn_spot_margin()["spotBNBBurn"]
+        return self.retry(self.binance_client.get_bnb_burn_spot_margin)["spotBNBBurn"]
 
     def get_fee(self):
         return 0.00075
@@ -47,13 +47,14 @@ class BinanceAPIManager:
         """
         Get ticker price of all coins
         """
-        return AllTickers(self.binance_client.get_all_tickers())
+        return AllTickers(self.retry(self.binance_client.get_all_tickers))
 
     def get_market_ticker_price(self, ticker_symbol: str):
         """
         Get ticker price of a specific coin
         """
-        price = self.binance_client.get_symbol_ticker(symbol=ticker_symbol)
+        price = self.retry(self.binance_client.get_symbol_ticker,
+                           symbol=ticker_symbol)
         return float(price["price"]) if price else None
 
     def get_full_balance(self):
@@ -62,7 +63,7 @@ class BinanceAPIManager:
         """
         return {
             currency_balance["asset"]: float(currency_balance.get("free", 0))
-            for currency_balance in self.binance_client.get_account()["balances"]
+            for currency_balance in self.retry(self.binance_client.get_account)["balances"]
             if currency_balance["asset"]
         }
 
@@ -73,13 +74,16 @@ class BinanceAPIManager:
         return self.get_full_balance().get(currency_symbol)
 
     def retry(self, func, *args, **kwargs):
-        time.sleep(1)
         attempts = 0
+        timeout = 0.1
         while attempts < 20:
             try:
                 return func(*args, **kwargs)
+            except BinanceAPIException as e:
+                self.logger.info(e)
+                time.sleep(timeout * 2 ** attempts)
             except Exception as e:  # pylint: disable=broad-except
-                self.logger.info("Failed to Buy/Sell. Trying Again.")
+                self.logger.info("Failed to execute binance api call.")
                 if attempts == 0:
                     self.logger.info(e)
                 attempts += 1
@@ -88,7 +92,8 @@ class BinanceAPIManager:
     def get_symbol_filter(self, origin_symbol: str, target_symbol: str, filter_type: str):
         return next(
             _filter
-            for _filter in self.binance_client.get_symbol_info(origin_symbol + target_symbol)["filters"]
+            for _filter in self.retry(self.binance_client.get_symbol_info,
+                                      origin_symbol + target_symbol)["filters"]
             if _filter["filterType"] == filter_type
         )
 
@@ -104,56 +109,45 @@ class BinanceAPIManager:
         return float(self.get_symbol_filter(origin_symbol, target_symbol, "MIN_NOTIONAL")["minNotional"])
 
     def wait_for_order(self, origin_symbol, target_symbol, order_id):
-        while True:
-            try:
-                order_status = self.binance_client.get_order(symbol=origin_symbol + target_symbol, orderId=order_id)
-                break
-            except BinanceAPIException as e:
-                self.logger.info(e)
-                time.sleep(1)
-            except Exception as e:  # pylint: disable=broad-except
-                self.logger.info(f"Unexpected Error: {e}")
-                time.sleep(1)
+        order_status = self.retry(self.binance_client.get_order,
+                                  symbol=origin_symbol + target_symbol,
+                                  orderId=order_id)
 
         self.logger.info(order_status)
 
         while order_status["status"] != "FILLED":
-            try:
-                order_status = self.binance_client.get_order(symbol=origin_symbol + target_symbol, orderId=order_id)
+            order_status = self.retry(self.binance_client.get_order,
+                                      symbol=origin_symbol + target_symbol,
+                                      orderId=order_id)
 
-                if self._should_cancel_order(order_status):
-                    cancel_order = None
-                    while cancel_order is None:
-                        cancel_order = self.binance_client.cancel_order(
-                            symbol=origin_symbol + target_symbol, orderId=order_id
-                        )
-                    self.logger.info("Order timeout, canceled...")
+            if self._should_cancel_order(order_status):
+                cancel_order = None
+                while cancel_order is None:
+                    cancel_order = self.retry(self.binance_client.cancel_order,
+                                              symbol=origin_symbol + target_symbol,
+                                              orderId=order_id)
 
-                    # sell partially
-                    if order_status["status"] == "PARTIALLY_FILLED" and order_status["side"] == "BUY":
-                        self.logger.info("Sell partially filled amount")
+                self.logger.info("Order timeout, canceled...")
 
-                        order_quantity = self._sell_quantity(origin_symbol, target_symbol)
-                        partially_order = None
-                        while partially_order is None:
-                            partially_order = self.binance_client.order_market_sell(
-                                symbol=origin_symbol + target_symbol, quantity=order_quantity
-                            )
+                # sell partially
+                if order_status["status"] == "PARTIALLY_FILLED" and order_status["side"] == "BUY":
+                    self.logger.info("Sell partially filled amount")
 
-                    self.logger.info("Going back to scouting mode...")
-                    return None
+                    order_quantity = self._sell_quantity(origin_symbol, target_symbol)
+                    partially_order = None
+                    while partially_order is None:
+                        partially_order = self.retry(self.binance_client.order_market_sell,
+                                                     symbol=origin_symbol + target_symbol,
+                                                     quantity=order_quantity)
 
-                if order_status["status"] == "CANCELED":
-                    self.logger.info("Order is canceled, going back to scouting mode...")
-                    return None
+                self.logger.info("Going back to scouting mode...")
+                return None
 
-                time.sleep(1)
-            except BinanceAPIException as e:
-                self.logger.info(e)
-                time.sleep(1)
-            except Exception as e:  # pylint: disable=broad-except
-                self.logger.info(f"Unexpected Error: {e}")
-                time.sleep(1)
+            if order_status["status"] == "CANCELED":
+                self.logger.info("Order is canceled")
+                return None
+
+            time.sleep(1)
 
         return order_status
 
@@ -175,11 +169,8 @@ class BinanceAPIManager:
 
         return False
 
-    def buy_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers):
-        return self.retry(self._buy_alt, origin_coin, target_coin, all_tickers)
-
     def _buy_quantity(
-        self, origin_symbol: str, target_symbol: str, target_balance: float = None, from_coin_price: float = None
+            self, origin_symbol: str, target_symbol: str, target_balance: float = None, from_coin_price: float = None
     ):
         target_balance = target_balance or self.get_currency_balance(target_symbol)
         from_coin_price = from_coin_price or self.get_all_market_tickers().get_price(origin_symbol + target_symbol)
@@ -187,7 +178,8 @@ class BinanceAPIManager:
         origin_tick = self.get_alt_tick(origin_symbol, target_symbol)
         return math.floor(target_balance * 10 ** origin_tick / from_coin_price) / float(10 ** origin_tick)
 
-    def _buy_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers):
+    def buy_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers) -> Union[
+        tuple[bool, None], tuple[bool, dict]]:
         """
         Buy altcoin
         """
@@ -203,40 +195,29 @@ class BinanceAPIManager:
         order_quantity = self._buy_quantity(origin_symbol, target_symbol, target_balance, from_coin_price)
 
         if order_quantity * from_coin_price < self.get_min_notional(origin_symbol, target_symbol):
-            return None
+            return False, None
 
-        self.logger.info(f"BUY QTY {order_quantity}")
+        self.logger.info(f"Buying {order_quantity} of {origin_symbol} with price {from_coin_price:>6.9f}")
 
-        # Try to buy until successful
-        order = None
-        while order is None:
-            try:
-                order = self.binance_client.order_limit_buy(
-                    symbol=origin_symbol + target_symbol,
-                    quantity=order_quantity,
-                    price=from_coin_price,
-                )
-                self.logger.info(order)
-            except BinanceAPIException as e:
-                self.logger.info(e)
-                time.sleep(1)
-            except Exception as e:  # pylint: disable=broad-except
-                self.logger.info(f"Unexpected Error: {e}")
+        order = self.retry(self.binance_client.order_limit_buy,
+                           symbol=origin_symbol + target_symbol,
+                           quantity=order_quantity,
+                           price=from_coin_price)
+
+        self.logger.info(order)
 
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
 
         stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
 
         if stat is None:
-            return None
+            trade_log.set_canceled()
+            return True, None
 
         self.logger.info(f"Bought {origin_symbol}")
         trade_log.set_complete(stat["cummulativeQuoteQty"])
 
-        return order
-
-    def sell_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers):
-        return self.retry(self._sell_alt, origin_coin, target_coin, all_tickers)
+        return True, order
 
     def _sell_quantity(self, origin_symbol: str, target_symbol: str, origin_balance: float = None):
         origin_balance = origin_balance or self.get_currency_balance(origin_symbol)
@@ -244,7 +225,8 @@ class BinanceAPIManager:
         origin_tick = self.get_alt_tick(origin_symbol, target_symbol)
         return math.floor(origin_balance * 10 ** origin_tick) / float(10 ** origin_tick)
 
-    def _sell_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers):
+    def sell_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers) -> Union[
+        tuple[bool, None], tuple[bool, dict]]:
         """
         Sell altcoin
         """
@@ -258,29 +240,28 @@ class BinanceAPIManager:
         from_coin_price = all_tickers.get_price(origin_symbol + target_symbol)
 
         order_quantity = self._sell_quantity(origin_symbol, target_symbol, origin_balance)
-        self.logger.info(f"Selling {order_quantity} of {origin_symbol}")
 
-        self.logger.info(f"Balance is {origin_balance}")
-        order = None
-        while order is None:
-            # Should sell at calculated price to avoid lost coin
-            try:
-                order = self.binance_client.order_limit_sell(
-                    symbol=origin_symbol + target_symbol, quantity=order_quantity, price=from_coin_price
-                )
-                self.logger.info(order)
-            except BinanceAPIException as e:
-                self.logger.info(e)
-                time.sleep(1)
-            except Exception as e:  # pylint: disable=broad-except
-                self.logger.info(f"Unexpected Error: {e}")
+        if order_quantity * from_coin_price < self.get_min_notional(origin_symbol, target_symbol):
+            return False, None
+
+        self.logger.info(
+            f"Selling {order_quantity} / {origin_balance} of {origin_symbol} with price {from_coin_price:>6.9f}"
+        )
+
+        order = self.retry(self.binance_client.order_limit_sell,
+                           symbol=origin_symbol + target_symbol,
+                           quantity=order_quantity,
+                           price=from_coin_price)
+
+        self.logger.info(order)
 
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
 
         stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
 
         if stat is None:
-            return None
+            trade_log.set_canceled()
+            return True, None
 
         new_balance = self.get_currency_balance(origin_symbol)
         while new_balance >= origin_balance:
@@ -290,4 +271,4 @@ class BinanceAPIManager:
 
         trade_log.set_complete(stat["cummulativeQuoteQty"])
 
-        return order
+        return True, order
