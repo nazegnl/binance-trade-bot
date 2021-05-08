@@ -40,6 +40,28 @@ class AutoTrader:
 
         return buy_order
 
+    def try_direct_transaction(self, pair: Pair, all_tickers: AllTickers):
+        """
+        Try to jump from the source coin to the destination coin directly
+        """
+        _, result = False, None
+        if all_tickers.get_price(pair.from_coin_id + pair.to_coin_id) is not None:
+            self.logger.info(
+                "Direct pair {0}{1} exists. Selling {0} for {1}".format(pair.from_coin_id, pair.to_coin_id)
+            )
+            _, result = self.manager.sell_alt(pair.from_coin, pair.to_coin, all_tickers)
+
+        elif all_tickers.get_price(pair.to_coin_id + pair.from_coin_id) is not None:
+            self.logger.info(
+                "Direct pair {0}{1} exists. Buying {0} with {1}".format(pair.to_coin_id, pair.from_coin_id)
+            )
+            _, result = self.manager.buy_alt(pair.to_coin, pair.from_coin, all_tickers)
+
+        if result is None:
+            return False
+
+        self.update_trade_threshold(pair.to_coin, float(result["price"]), all_tickers)
+        return True
 
     def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
         """
