@@ -12,6 +12,7 @@ class TradeState(enum.Enum):
     STARTING = "STARTING"
     ORDERED = "ORDERED"
     COMPLETE = "COMPLETE"
+    CANCELED = "CANCELED"
 
 
 class Trade(Base):  # pylint: disable=too-few-public-methods

@@ -24,29 +24,22 @@ class AutoTrader:
         """
         Jump from the source coin to the destination coin through bridge coin
         """
-        can_sell = False
-        balance = self.manager.get_currency_balance(pair.from_coin.symbol)
-        from_coin_price = all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
-
-        if balance and balance * from_coin_price > self.manager.get_min_notional(pair.from_coin, self.config.BRIDGE):
-            can_sell = True
-        else:
-            self.logger.info("Skipping sell")
-
-        if can_sell and self.manager.sell_alt(pair.from_coin, self.config.BRIDGE, all_tickers) is None:
+        can_sell, sell_order = self.manager.sell_alt(pair.from_coin, self.config.BRIDGE, all_tickers)
+        if can_sell and sell_order is None:
             self.logger.info("Couldn't sell, going back to scouting mode...")
             return None
 
-        result = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE, all_tickers)
+        can_buy, buy_order = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE, all_tickers)
+        if can_buy and buy_order is None:
+            self.logger.info("Couldn't buy, going back to scouting mode...")
+            self.db.set_current_coin(pair.from_coin)
+            return None
 
-        if result is not None:
-            self.db.set_current_coin(pair.to_coin)
-            self.update_trade_threshold(pair.to_coin, float(result["price"]), all_tickers)
-            return result
+        self.db.set_current_coin(pair.to_coin)
+        self.update_trade_threshold(pair.to_coin, float(buy_order["price"]), all_tickers)
 
-        self.logger.info("Couldn't buy, going back to scouting mode...")
-        self.db.set_current_coin(pair.from_coin)
-        return None
+        return buy_order
+
 
     def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
         """

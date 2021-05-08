@@ -89,7 +89,8 @@ class Database:
         session: Session
         with self.db_session() as session:
             coin = session.query(Coin).get(coin)
-            session.expunge(coin)
+            if coin:
+                session.expunge(coin)
             return coin
 
     def set_current_coin(self, coin: Union[Coin, str]):
@@ -266,6 +267,11 @@ class TradeLog:
             trade.crypto_trade_amount = crypto_trade_amount
             trade.state = TradeState.COMPLETE
 
+    def set_canceled(self):
+        session: Session
+        with self.db.db_session() as session:
+            trade: Trade = session.merge(self.trade)
+            trade.state = TradeState.CANCELED
 
 if __name__ == "__main__":
     database = Database(Logger(), Config())
