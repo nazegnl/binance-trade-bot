@@ -73,7 +73,6 @@ class BinanceAPIManager:
         return self.get_full_balance().get(currency_symbol)
 
     def retry(self, func, *args, **kwargs):
-        time.sleep(1)
         attempts = 0
         while attempts < 20:
             try:
@@ -83,6 +82,7 @@ class BinanceAPIManager:
                 if attempts == 0:
                     self.logger.info(e)
                 attempts += 1
+                time.sleep(1)
         return None
 
     def get_symbol_filter(self, origin_symbol: str, target_symbol: str, filter_type: str):
