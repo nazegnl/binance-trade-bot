@@ -1,3 +1,4 @@
+import os.path
 from datetime import datetime, timedelta
 from traceback import format_exc
 from typing import Dict, List, Tuple, Union
@@ -10,8 +11,6 @@ from .database import Database, ScoutLog
 from .logger import Logger
 from .models import Coin
 from .strategies import get_strategy
-
-cache = SqliteDict("data/backtest_cache.db")
 
 
 class FakeAllTickers(AllTickers):  # pylint: disable=too-few-public-methods
@@ -28,6 +27,7 @@ class MockBinanceManager(BinanceAPIManager):
         config: Config,
         db: Database,
         logger: Logger,
+        cache: SqliteDict,
         start_date: datetime = None,
         start_balances: Dict[str, float] = None,
     ):
@@ -35,6 +35,7 @@ class MockBinanceManager(BinanceAPIManager):
         self.config = config
         self.datetime = start_date or datetime(2021, 1, 1)
         self.balances = start_balances or {config.BRIDGE.symbol: 100}
+        self.cache = cache
 
     def increment(self, interval=1):
         self.datetime += timedelta(minutes=interval)
@@ -54,7 +55,7 @@ class MockBinanceManager(BinanceAPIManager):
         """
         target_date = self.datetime.strftime("%d %b %Y %H:%M:%S")
         key = f"{ticker_symbol} - {target_date}"
-        val = cache.get(key, None)
+        val = self.cache.get(key, None)
         if val is None:
             end_date = self.datetime + timedelta(minutes=1000)
             if end_date > datetime.now():
@@ -66,9 +67,9 @@ class MockBinanceManager(BinanceAPIManager):
             ):
                 date = datetime.utcfromtimestamp(result[0] / 1000).strftime("%d %b %Y %H:%M:%S")
                 price = float(result[1])
-                cache[f"{ticker_symbol} - {date}"] = price
-            cache.commit()
-            val = cache.get(key, None)
+                self.cache[f"{ticker_symbol} - {date}"] = price
+            self.cache.commit()
+            val = self.cache.get(key, None)
         return val
 
     def get_full_balance(self):
@@ -150,6 +151,7 @@ def backtest(
     start_balances: Dict[str, float] = None,
     starting_coin: str = None,
     config: Config = None,
+    cache: SqliteDict = None,
 ):
     """
 
@@ -165,13 +167,13 @@ def backtest(
     """
     config = config or Config()
     logger = Logger("backtesting", enable_notifications=False)
-
+    cache = cache or SqliteDict("data/backtest_cache.db")
     end_date = end_date or datetime.today()
 
     db = MockDatabase(logger, config)
     db.create_database()
     db.set_coins(config.SUPPORTED_COIN_LIST)
-    manager = MockBinanceManager(config, db, logger, start_date, start_balances)
+    manager = MockBinanceManager(config, db, logger, cache, start_date, start_balances)
 
     starting_coin = db.get_coin(starting_coin or config.SUPPORTED_COIN_LIST[0])
     if not manager.get_currency_balance(starting_coin.symbol):

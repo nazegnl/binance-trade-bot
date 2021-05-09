@@ -1,6 +1,10 @@
 from datetime import datetime
 
+from sqlitedict import SqliteDict
+
 from binance_trade_bot import backtest
+
+cache = SqliteDict("data/backtest_cache.db")
 
 if __name__ == "__main__":
     history = []
