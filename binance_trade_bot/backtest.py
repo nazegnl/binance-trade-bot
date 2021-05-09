@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from traceback import format_exc
-from typing import Dict, List
+from typing import Dict, List, Tuple, Union
 
 from sqlitedict import SqliteDict
 
@@ -77,7 +77,9 @@ class MockBinanceManager(BinanceAPIManager):
         """
         return self.balances
 
-    def buy_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers):
+    def buy_alt(
+        self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers
+    ) -> Union[Tuple[bool, None], Tuple[bool, dict]]:
         origin_symbol = origin_coin.symbol
         target_symbol = target_coin.symbol
 
@@ -92,9 +94,11 @@ class MockBinanceManager(BinanceAPIManager):
             f"Bought {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
             f"{self.balances[target_symbol]}"
         )
-        return {"price": from_coin_price}
+        return True, {"price": from_coin_price}
 
-    def sell_alt(self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers):
+    def sell_alt(
+        self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers
+    ) -> Union[Tuple[bool, None], Tuple[bool, dict]]:
         origin_symbol = origin_coin.symbol
         target_symbol = target_coin.symbol
 
@@ -109,7 +113,7 @@ class MockBinanceManager(BinanceAPIManager):
             f"Sold {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
             f"{self.balances[target_symbol]}"
         )
-        return {"price": from_coin_price}
+        return True, {"price": from_coin_price}
 
     def collate_coins(self, target_symbol: str):
         total = 0

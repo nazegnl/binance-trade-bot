@@ -13,6 +13,7 @@ class TradeState(enum.Enum):
     ORDERED = "ORDERED"
     COMPLETE = "COMPLETE"
     CANCELED = "CANCELED"
+    FAILED = "FAILED"
 
 
 class Trade(Base):  # pylint: disable=too-few-public-methods
@@ -34,6 +35,7 @@ class Trade(Base):  # pylint: disable=too-few-public-methods
     alt_trade_amount = Column(Float)
     crypto_starting_balance = Column(Float)
     crypto_trade_amount = Column(Float)
+    price = Column(Float)
 
     datetime = Column(DateTime)
 
@@ -56,4 +58,5 @@ class Trade(Base):  # pylint: disable=too-few-public-methods
             "crypto_starting_balance": self.crypto_starting_balance,
             "crypto_trade_amount": self.crypto_trade_amount,
             "datetime": self.datetime.isoformat(),
+            "price": self.price,
         }

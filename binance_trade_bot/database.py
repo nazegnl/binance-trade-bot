@@ -150,6 +150,20 @@ class Database:
                 sh = ScoutHistory(merged_pair, log.target_ratio, log.current_coin_price, log.other_coin_price)
                 session.add(sh)
 
+    def get_last_sell_trade(self) -> Union[Trade, None]:
+        session: Session
+        with self.db_session() as session:
+            previous_sell_trade = (
+                session.query(Trade)
+                .filter(Trade.selling, Trade.state == TradeState.COMPLETE)
+                .order_by(Trade.datetime.desc())
+                .first()
+            )
+            if previous_sell_trade is None:
+                return None
+            session.expunge(previous_sell_trade)
+            return previous_sell_trade
+
     def prune_scout_history(self):
         time_diff = datetime.now() - timedelta(hours=self.config.SCOUT_HISTORY_PRUNE_TIME)
         session: Session
@@ -265,6 +279,7 @@ class TradeLog:
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
             trade.crypto_trade_amount = crypto_trade_amount
+            trade.price = float(trade.crypto_trade_amount) / float(trade.alt_trade_amount)
             trade.state = TradeState.COMPLETE
 
     def set_canceled(self):
@@ -272,6 +287,13 @@ class TradeLog:
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
             trade.state = TradeState.CANCELED
+
+    def set_failed(self):
+        session: Session
+        with self.db.db_session() as session:
+            trade: Trade = session.merge(self.trade)
+            trade.state = TradeState.FAILED
+
 
 if __name__ == "__main__":
     database = Database(Logger(), Config())

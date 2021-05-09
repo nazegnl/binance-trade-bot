@@ -32,14 +32,13 @@ class AutoTrader:
         can_buy, buy_order = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE, all_tickers)
         if can_buy and buy_order is None:
             self.logger.info("Couldn't buy, going back to scouting mode...")
-            self.db.set_current_coin(pair.from_coin)
+            self.db.set_current_coin(self.config.BRIDGE)
             return None
 
         self.db.set_current_coin(pair.to_coin)
         self.update_trade_threshold(pair.to_coin, float(buy_order["price"]), all_tickers)
 
         return buy_order
-
 
     def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
         """
