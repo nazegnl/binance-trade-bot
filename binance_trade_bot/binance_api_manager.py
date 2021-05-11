@@ -214,17 +214,17 @@ class BinanceAPIManager:
             return True, None
 
         self.logger.info(order)
-
-        trade_log.set_ordered(origin_balance, target_balance, order_quantity)
-
-        order = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-
-        if not order:
-            trade_log.set_canceled()
-            return True, None
+        qty = order["executedQty"]
+        if order["status"] != "FILLED":
+            trade_log.set_ordered(origin_balance, target_balance, order_quantity)
+            stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if stat is None:
+                trade_log.set_canceled()
+                return True, None
+            qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Bought {origin_symbol}")
-        trade_log.set_complete(order["cummulativeQuoteQty"])
+        trade_log.set_complete(qty)
 
         return True, order
 
@@ -272,20 +272,17 @@ class BinanceAPIManager:
 
         self.logger.info(order)
 
-        trade_log.set_ordered(origin_balance, target_balance, order_quantity)
-
-        order = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-
-        if not order:
-            trade_log.set_canceled()
-            return True, None
-
-        new_balance = self.get_currency_balance(origin_symbol)
-        while new_balance >= origin_balance:
-            new_balance = self.get_currency_balance(origin_symbol)
+        qty = order["executedQty"]
+        if order["status"] != "FILLED":
+            trade_log.set_ordered(origin_balance, target_balance, order_quantity)
+            stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if stat is None:
+                trade_log.set_canceled()
+                return True, None
+            qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Sold {origin_symbol}")
 
-        trade_log.set_complete(order["cummulativeQuoteQty"])
+        trade_log.set_complete(qty)
 
         return True, order
