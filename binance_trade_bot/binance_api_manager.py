@@ -13,16 +13,16 @@ from .models import Coin
 
 
 class AllTickers:  # pylint: disable=too-few-public-methods
-    def __init__(self, all_tickers: List[Dict]):
+    def __init__(self, all_tickers: List[Dict]) -> None:
         self.all_tickers = all_tickers
 
-    def get_price(self, ticker_symbol):
+    def get_price(self, ticker_symbol) -> float:
         ticker = next((t for t in self.all_tickers if t["symbol"] == ticker_symbol), None)
         return float(ticker["price"]) if ticker else None
 
 
 class BinanceAPIManager:
-    def __init__(self, config: Config, db: Database, logger: Logger):
+    def __init__(self, config: Config, db: Database, logger: Logger) -> None:
         self.binance_client = Client(
             config.BINANCE_API_KEY,
             config.BINANCE_API_SECRET_KEY,
@@ -38,7 +38,7 @@ class BinanceAPIManager:
             ticker["symbol"]: ticker["taker"] for ticker in self.retry(self.binance_client.get_trade_fee)["tradeFee"]
         }
 
-    def get_fee(self):
+    def get_fee(self) -> float:
         return 0.00075
 
     def get_all_market_tickers(self) -> AllTickers:
@@ -47,14 +47,14 @@ class BinanceAPIManager:
         """
         return AllTickers(self.retry(self.binance_client.get_all_tickers))
 
-    def get_market_ticker_price(self, ticker_symbol: str):
+    def get_market_ticker_price(self, ticker_symbol: str) -> float:
         """
         Get ticker price of a specific coin
         """
         price = self.retry(self.binance_client.get_symbol_ticker, symbol=ticker_symbol)
         return float(price["price"]) if price else None
 
-    def get_full_balance(self):
+    def get_full_balance(self) -> Dict[str, float]:
         """
         Get full balance of the current account
         """
@@ -64,7 +64,7 @@ class BinanceAPIManager:
             if currency_balance["asset"]
         }
 
-    def get_currency_balance(self, currency_symbol: str):
+    def get_currency_balance(self, currency_symbol: str) -> float:
         """
         Get balance of a specific coin
         """
@@ -87,7 +87,7 @@ class BinanceAPIManager:
                 time.sleep(1)
         return None
 
-    def get_symbol_filter(self, origin_symbol: str, target_symbol: str, filter_type: str):
+    def get_symbol_filter(self, origin_symbol: str, target_symbol: str, filter_type: str) -> Dict:
         return next(
             _filter
             for _filter in self.get_symbol_info(origin_symbol + target_symbol)["filters"]
@@ -95,16 +95,16 @@ class BinanceAPIManager:
         )
 
     @cached(cache=TTLCache(maxsize=2000, ttl=43200))
-    def get_symbol_info(self, origin_symbol: str, target_symbol: str):
+    def get_symbol_info(self, origin_symbol: str, target_symbol: str) -> Optional[Any]:
         return self.retry(self.binance_client.get_symbol_info, origin_symbol + target_symbol)
 
-    def get_alt_tick(self, origin_symbol: str, target_symbol: str):
+    def get_alt_tick(self, origin_symbol: str, target_symbol: str) -> float:
         step_size = self.get_symbol_filter(origin_symbol, target_symbol, "LOT_SIZE")["stepSize"]
         if step_size.find("1") == 0:
             return 1 - step_size.find(".")
         return step_size.find("1") - 1
 
-    def get_min_notional(self, origin_symbol: str, target_symbol: str):
+    def get_min_notional(self, origin_symbol: str, target_symbol: str) -> float:
         return float(self.get_symbol_filter(origin_symbol, target_symbol, "MIN_NOTIONAL")["minNotional"])
 
     def wait_for_order(self, origin_symbol, target_symbol, order_id) -> Optional[Any]:
@@ -147,8 +147,7 @@ class BinanceAPIManager:
 
             time.sleep(1)
 
-
-    def _should_cancel_order(self, order_status):
+    def _should_cancel_order(self, order_status) -> bool:
         minutes = (time.time() - order_status["time"] / 1000) / 60
         timeout = float(self.config.SELL_TIMEOUT) if order_status["side"] == "SELL" else float(self.config.BUY_TIMEOUT)
 
@@ -168,7 +167,7 @@ class BinanceAPIManager:
 
     def _buy_quantity(
         self, origin_symbol: str, target_symbol: str, target_balance: float = None, from_coin_price: float = None
-    ):
+    ) -> float:
         target_balance = target_balance or self.get_currency_balance(target_symbol)
         from_coin_price = from_coin_price or self.get_all_market_tickers().get_price(origin_symbol + target_symbol)
 
@@ -224,7 +223,7 @@ class BinanceAPIManager:
 
         return True, order
 
-    def _sell_quantity(self, origin_symbol: str, target_symbol: str, origin_balance: float = None):
+    def _sell_quantity(self, origin_symbol: str, target_symbol: str, origin_balance: float = None) -> float:
         origin_balance = origin_balance or self.get_currency_balance(origin_symbol)
 
         origin_tick = self.get_alt_tick(origin_symbol, target_symbol)

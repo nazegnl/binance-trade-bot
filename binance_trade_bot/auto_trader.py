@@ -1,5 +1,6 @@
+import abc
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional, Union
 
 from sqlalchemy.orm import Session
 
@@ -11,16 +12,16 @@ from .models import Coin, CoinValue, Pair
 
 
 class AutoTrader:
-    def __init__(self, binance_manager: BinanceAPIManager, database: Database, logger: Logger, config: Config):
+    def __init__(self, binance_manager: BinanceAPIManager, database: Database, logger: Logger, config: Config) -> None:
         self.manager = binance_manager
         self.db = database
         self.logger = logger
         self.config = config
 
-    def initialize(self):
+    def initialize(self) -> None:
         self.initialize_trade_thresholds()
 
-    def transaction_through_bridge(self, pair: Pair, all_tickers: AllTickers):
+    def transaction_through_bridge(self, pair: Pair, all_tickers: AllTickers) -> Optional[Dict]:
         """
         Jump from the source coin to the destination coin through bridge coin
         """
@@ -40,7 +41,7 @@ class AutoTrader:
 
         return buy_order
 
-    def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
+    def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
         """
         Update all the coins with the threshold of buying the current held coin
         """
@@ -62,7 +63,7 @@ class AutoTrader:
 
                 pair.ratio = from_coin_price / coin_price
 
-    def initialize_trade_thresholds(self):
+    def initialize_trade_thresholds(self) -> None:
         """
         Initialize the buying threshold of all the coins for trading between them
         """
@@ -91,13 +92,14 @@ class AutoTrader:
 
                 pair.ratio = from_coin_price / to_coin_price
 
-    def scout(self):
+    @abc.abstractmethod
+    def scout(self) -> None:
         """
         Scout for potential jumps from the current coin to another coin
         """
         raise NotImplementedError()
 
-    def _get_ratios(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
+    def _get_ratios(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> Dict[Pair, float]:
         """
         Given a coin, get the current price ratio for every other enabled coin
         """
@@ -122,7 +124,7 @@ class AutoTrader:
         self.db.log_scout(scouts)
         return ratio_dict
 
-    def _jump_to_best_coin(self, coin: Coin, coin_price: float, all_tickers: AllTickers):
+    def _jump_to_best_coin(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
         """
         Given a coin, search for a coin to jump to
         """
@@ -137,7 +139,7 @@ class AutoTrader:
             self.logger.info(f"Will be jumping from {coin} to {best_pair.to_coin_id}")
             self.transaction_through_bridge(best_pair, all_tickers)
 
-    def bridge_scout(self):
+    def bridge_scout(self) -> Optional[Coin]:
         """
         If we have any bridge coin leftover, buy a coin with it that we won't immediately trade out of
         """
@@ -159,7 +161,7 @@ class AutoTrader:
                     return coin
         return None
 
-    def update_values(self):
+    def update_values(self) -> None:
         """
         Log current value state of all altcoin balances against BTC and USDT in DB.
         """

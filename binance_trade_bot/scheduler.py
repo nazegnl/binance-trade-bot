@@ -14,13 +14,13 @@ class SafeScheduler(Scheduler):
     whether other jobs will run or if they'll crash the entire script.
     """
 
-    def __init__(self, logger: logging.Logger, rerun_immediately=True):
+    def __init__(self, logger: logging.Logger, rerun_immediately=True) -> None:
         self.logger = logger
         self.rerun_immediately = rerun_immediately
 
         super().__init__()
 
-    def _run_job(self, job: Job):
+    def _run_job(self, job: Job) -> None:
         try:
             super()._run_job(job)
         except Exception:  # pylint: disable=broad-except

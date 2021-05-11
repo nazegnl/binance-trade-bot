@@ -21,13 +21,13 @@ class ScoutLog:
 
 
 class Database:
-    def __init__(self, logger: Logger, config: Config, uri="sqlite:///data/crypto_trading.db"):
+    def __init__(self, logger: Logger, config: Config, uri="sqlite:///data/crypto_trading.db") -> None:
         self.logger = logger
         self.config = config
         self.engine = create_engine(uri)
 
     @contextmanager
-    def db_session(self):
+    def db_session(self) -> Session:
         """
         Creates a context with an open SQLAlchemy session.
         """
@@ -42,7 +42,7 @@ class Database:
         finally:
             session.close()
 
-    def set_coins(self, symbols: List[str]):
+    def set_coins(self, symbols: List[str]) -> None:
         session: Session
 
         # Add coins to the database and set them as enabled or not
@@ -93,7 +93,7 @@ class Database:
                 session.expunge(coin)
             return coin
 
-    def set_current_coin(self, coin: Union[Coin, str]):
+    def set_current_coin(self, coin: Union[Coin, str]) -> None:
         coin = self.get_coin(coin)
         session: Session
         with self.db_session() as session:
@@ -108,9 +108,8 @@ class Database:
             current_coin = session.query(CurrentCoin).order_by(CurrentCoin.datetime.desc()).first()
             if current_coin is None:
                 return None
-            coin = current_coin.coin
-            session.expunge(coin)
-            return coin
+            session.expunge(current_coin)
+            return current_coin
 
     def get_pair(self, from_coin: Union[Coin, str], to_coin: Union[Coin, str]):
         from_coin = self.get_coin(from_coin)
@@ -142,7 +141,7 @@ class Database:
             session.expunge_all()
             return pairs
 
-    def log_scout(self, scouts: List[ScoutLog]):
+    def log_scout(self, scouts: List[ScoutLog]) -> None:
         session: Session
         with self.db_session() as session:
             for log in scouts:
@@ -150,7 +149,7 @@ class Database:
                 sh = ScoutHistory(merged_pair, log.target_ratio, log.current_coin_price, log.other_coin_price)
                 session.add(sh)
 
-    def get_last_sell_trade(self) -> Union[Trade, None]:
+    def get_last_sell_trade(self) -> Optional[Trade]:
         session: Session
         with self.db_session() as session:
             previous_sell_trade = (
@@ -164,13 +163,13 @@ class Database:
             session.expunge(previous_sell_trade)
             return previous_sell_trade
 
-    def prune_scout_history(self):
+    def prune_scout_history(self) -> None:
         time_diff = datetime.now() - timedelta(hours=self.config.SCOUT_HISTORY_PRUNE_TIME)
         session: Session
         with self.db_session() as session:
             session.query(ScoutHistory).filter(ScoutHistory.datetime < time_diff).delete()
 
-    def prune_value_history(self):
+    def prune_value_history(self) -> None:
         session: Session
         with self.db_session() as session:
             # Sets the first entry for each coin for each hour as 'hourly'
@@ -216,13 +215,13 @@ class Database:
 
             # All weekly entries will be kept forever
 
-    def create_database(self):
+    def create_database(self) -> None:
         Base.metadata.create_all(self.engine)
 
-    def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool):
+    def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool) -> TradeLog:
         return TradeLog(self, from_coin, to_coin, selling)
 
-    def migrate_old_state(self):
+    def migrate_old_state(self) -> None:
         """
         For migrating from old dotfile format to SQL db. This method should be removed in
         the future.
@@ -265,7 +264,7 @@ class TradeLog:
             # Flush so that SQLAlchemy fills in the id column
             session.flush()
 
-    def set_ordered(self, alt_starting_balance, crypto_starting_balance, alt_trade_amount):
+    def set_ordered(self, alt_starting_balance, crypto_starting_balance, alt_trade_amount) -> None:
         session: Session
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
@@ -274,7 +273,7 @@ class TradeLog:
             trade.crypto_starting_balance = crypto_starting_balance
             trade.state = TradeState.ORDERED
 
-    def set_complete(self, crypto_trade_amount):
+    def set_complete(self, crypto_trade_amount) -> None:
         session: Session
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
@@ -282,19 +281,14 @@ class TradeLog:
             trade.price = float(trade.crypto_trade_amount) / float(trade.alt_trade_amount)
             trade.state = TradeState.COMPLETE
 
-    def set_canceled(self):
+    def set_canceled(self) -> None:
         session: Session
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
             trade.state = TradeState.CANCELED
 
-    def set_failed(self):
+    def set_failed(self) -> None:
         session: Session
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
             trade.state = TradeState.FAILED
-
-
-if __name__ == "__main__":
-    database = Database(Logger(), Config())
-    database.create_database()

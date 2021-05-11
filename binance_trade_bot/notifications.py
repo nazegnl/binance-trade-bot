@@ -20,10 +20,10 @@ class NotificationHandler:
         else:
             self.enabled = False
 
-    def start_worker(self):
+    def start_worker(self) -> None:
         threading.Thread(target=self.process_queue, daemon=True).start()
 
-    def process_queue(self):
+    def process_queue(self) -> None:
         while True:
             message, attachments = self.queue.get()
 
@@ -33,6 +33,6 @@ class NotificationHandler:
                 self.apobj.notify(body=message)
             self.queue.task_done()
 
-    def send_notification(self, message, attachments=None):
+    def send_notification(self, message, attachments=None) -> None:
         if self.enabled:
             self.queue.put((message, attachments or []))
