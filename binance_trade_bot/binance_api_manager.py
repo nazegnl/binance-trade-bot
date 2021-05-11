@@ -107,15 +107,14 @@ class BinanceAPIManager:
     def get_min_notional(self, origin_symbol: str, target_symbol: str):
         return float(self.get_symbol_filter(origin_symbol, target_symbol, "MIN_NOTIONAL")["minNotional"])
 
-    def wait_for_order(self, origin_symbol, target_symbol, order_id):
-        order_status = self.retry(self.binance_client.get_order, symbol=origin_symbol + target_symbol, orderId=order_id)
-
-        self.logger.info(order_status)
-
-        while order_status["status"] != "FILLED":
+    def wait_for_order(self, origin_symbol, target_symbol, order_id) -> Optional[Any]:
+        while True:
             order_status = self.retry(
                 self.binance_client.get_order, symbol=origin_symbol + target_symbol, orderId=order_id
             )
+            self.logger.info(order_status)
+            if order_status["status"] == "FILLED":
+                return order_status
 
             if self._should_cancel_order(order_status):
                 cancel_order = None
@@ -148,7 +147,6 @@ class BinanceAPIManager:
 
             time.sleep(1)
 
-        return order_status
 
     def _should_cancel_order(self, order_status):
         minutes = (time.time() - order_status["time"] / 1000) / 60
