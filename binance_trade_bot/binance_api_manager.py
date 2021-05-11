@@ -1,5 +1,6 @@
 import math
 import time
+import traceback
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from binance.client import Client
@@ -83,11 +84,12 @@ class BinanceAPIManager:
             except BinanceAPIException as e:
                 self.logger.info(e)
                 time.sleep(timeout * 2 ** attempts)
+                attempts += 1
+                traceback.print_exc()
             except Exception as e:  # pylint: disable=broad-except
                 self.logger.info("Failed to execute binance api call.")
                 if attempts == 0:
                     self.logger.info(e)
-                attempts += 1
                 time.sleep(1)
         return None
 
@@ -213,18 +215,18 @@ class BinanceAPIManager:
             trade_log.set_failed()
             return True, None
 
-        self.logger.info(order)
-
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
-
-        order = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-
-        if not order:
-            trade_log.set_canceled()
-            return True, None
+        self.logger.info(order)
+        qty = order["executedQty"]
+        if order["status"] != "FILLED":
+            stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if stat is None:
+                trade_log.set_canceled()
+                return True, None
+            qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Bought {origin_symbol}")
-        trade_log.set_complete(order["cummulativeQuoteQty"])
+        trade_log.set_complete(qty)
 
         return True, order
 
@@ -270,22 +272,19 @@ class BinanceAPIManager:
             trade_log.set_failed()
             return True, None
 
+        trade_log.set_ordered(origin_balance, target_balance, order_quantity)
         self.logger.info(order)
 
-        trade_log.set_ordered(origin_balance, target_balance, order_quantity)
-
-        order = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-
-        if not order:
-            trade_log.set_canceled()
-            return True, None
-
-        new_balance = self.get_currency_balance(origin_symbol)
-        while new_balance >= origin_balance:
-            new_balance = self.get_currency_balance(origin_symbol)
+        qty = order["executedQty"]
+        if order["status"] != "FILLED":
+            stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if stat is None:
+                trade_log.set_canceled()
+                return True, None
+            qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Sold {origin_symbol}")
 
-        trade_log.set_complete(order["cummulativeQuoteQty"])
+        trade_log.set_complete(qty)
 
         return True, order
