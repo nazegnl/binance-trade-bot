@@ -38,10 +38,6 @@ class BinanceAPIManager:
             ticker["symbol"]: ticker["taker"] for ticker in self.retry(self.binance_client.get_trade_fee)["tradeFee"]
         }
 
-    @cached(cache=TTLCache(maxsize=1, ttl=60))
-    def get_using_bnb_for_fees(self):
-        return self.retry(self.binance_client.get_bnb_burn_spot_margin)["spotBNBBurn"]
-
     def get_fee(self):
         return 0.00075
 
@@ -94,18 +90,20 @@ class BinanceAPIManager:
     def get_symbol_filter(self, origin_symbol: str, target_symbol: str, filter_type: str):
         return next(
             _filter
-            for _filter in self.retry(self.binance_client.get_symbol_info, origin_symbol + target_symbol)["filters"]
+            for _filter in self.get_symbol_info(origin_symbol + target_symbol)["filters"]
             if _filter["filterType"] == filter_type
         )
 
     @cached(cache=TTLCache(maxsize=2000, ttl=43200))
+    def get_symbol_info(self, origin_symbol: str, target_symbol: str):
+        return self.retry(self.binance_client.get_symbol_info, origin_symbol + target_symbol)
+
     def get_alt_tick(self, origin_symbol: str, target_symbol: str):
         step_size = self.get_symbol_filter(origin_symbol, target_symbol, "LOT_SIZE")["stepSize"]
         if step_size.find("1") == 0:
             return 1 - step_size.find(".")
         return step_size.find("1") - 1
 
-    @cached(cache=TTLCache(maxsize=2000, ttl=43200))
     def get_min_notional(self, origin_symbol: str, target_symbol: str):
         return float(self.get_symbol_filter(origin_symbol, target_symbol, "MIN_NOTIONAL")["minNotional"])
 
