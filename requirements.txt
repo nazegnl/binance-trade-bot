@@ -11,3 +11,4 @@ python-socketio[client]==5.0.4
 cachetools==4.2.1
 sqlitedict==1.7.0
 pytest==6.1.1
+apscheduler==3.7.0

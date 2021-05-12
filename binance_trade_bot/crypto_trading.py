@@ -1,12 +1,13 @@
 #!python3
-import time
+import os
+
+from apscheduler.schedulers.blocking import BlockingScheduler
 
 from .binance_api_manager import BinanceAPIManager
 from .config import Config
 from .database import Database
 from .logger import Logger
 from .maintenance import Maintenance
-from .scheduler import SafeScheduler
 from .strategies import get_strategy
 
 
@@ -40,13 +41,16 @@ def main():
 
     trader.initialize()
 
-    schedule = SafeScheduler(logger)
-    schedule.every(config.SCOUT_SLEEP_TIME).seconds.do(trader.scout).tag("scouting")
-    schedule.every(1).minutes.do(trader.update_values).tag("updating value history")
-    schedule.every(1).minutes.do(db.prune_scout_history).tag("pruning scout history")
-    schedule.every(1).hours.do(db.prune_value_history).tag("pruning value history")
-    schedule.every(1).hours.do(maintenance.warmup_cache()).tag("cache warmup")
+    scheduler = BlockingScheduler()
+    scheduler.add_job(trader.scout, "interval", seconds=config.SCOUT_SLEEP_TIME)
+    scheduler.add_job(trader.update_values, "interval", minutes=1)
+    scheduler.add_job(db.prune_scout_history, "interval", minutes=1)
+    scheduler.add_job(db.prune_value_history, "interval", hours=1)
+    scheduler.add_job(maintenance.warmup_cache, "interval", hours=1)
 
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    print("Press Ctrl+{} to exit".format("Break" if os.name == "nt" else "C"))
+
+    try:
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        pass
