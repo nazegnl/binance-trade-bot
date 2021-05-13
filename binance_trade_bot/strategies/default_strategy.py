@@ -1,16 +1,15 @@
 import random
 import sys
-from datetime import datetime
 
 from binance_trade_bot.auto_trader import AutoTrader
 
 
 class Strategy(AutoTrader):
-    def initialize(self):
-        super().initialize()
+    async def initialize(self):
+        await super().initialize()
         self.initialize_current_coin()
 
-    def scout(self):
+    async def scout(self):
         """
         Scout for potential jumps from the current coin to another coin
         """
@@ -32,7 +31,7 @@ class Strategy(AutoTrader):
             self.logger.info("Skipping scouting... current coin {} not found".format(current_coin + self.config.BRIDGE))
             return
 
-        self._jump_to_best_coin(current_coin, current_coin_price, all_tickers)
+        await self._jump_to_best_coin(current_coin, current_coin_price, all_tickers)
 
     def bridge_scout(self):
         current_coin = self.db.get_current_coin()

@@ -1,6 +1,6 @@
 import abc
 from datetime import datetime
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -18,30 +18,30 @@ class AutoTrader:
         self.logger = logger
         self.config = config
 
-    def initialize(self) -> None:
-        self.initialize_trade_thresholds()
+    async def initialize(self) -> None:
+        await self.initialize_trade_thresholds()
 
-    def transaction_through_bridge(self, pair: Pair, all_tickers: AllTickers) -> Optional[Dict]:
+    async def transaction_through_bridge(self, pair: Pair, all_tickers: AllTickers) -> Optional[Dict]:
         """
         Jump from the source coin to the destination coin through bridge coin
         """
-        can_sell, sell_order = self.manager.sell_alt(pair.from_coin, self.config.BRIDGE, all_tickers)
+        can_sell, sell_order = await self.manager.sell_alt(pair.from_coin, self.config.BRIDGE, all_tickers)
         if can_sell and sell_order is None:
             self.logger.info("Couldn't sell, going back to scouting mode...")
             return None
 
-        can_buy, buy_order = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE, all_tickers)
+        can_buy, buy_order = await self.manager.buy_alt(pair.to_coin, self.config.BRIDGE, all_tickers)
         if can_buy and buy_order is None:
             self.logger.info("Couldn't buy, going back to scouting mode...")
             self.db.set_current_coin(self.config.BRIDGE)
             return None
 
         self.db.set_current_coin(pair.to_coin)
-        self.update_trade_threshold(pair.to_coin, float(buy_order["price"]), all_tickers)
+        await self.update_trade_threshold(pair.to_coin, float(buy_order["price"]), all_tickers)
 
         return buy_order
 
-    def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
+    async def update_trade_threshold(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
         """
         Update all the coins with the threshold of buying the current held coin
         """
@@ -53,7 +53,7 @@ class AutoTrader:
         session: Session
         with self.db.db_session() as session:
             for pair in session.query(Pair).filter(Pair.to_coin == coin):
-                from_coin_price = all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
+                from_coin_price = await all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
 
                 if from_coin_price is None:
                     self.logger.info(
@@ -63,7 +63,7 @@ class AutoTrader:
 
                 pair.ratio = from_coin_price / coin_price
 
-    def initialize_trade_thresholds(self) -> None:
+    async def initialize_trade_thresholds(self) -> None:
         """
         Initialize the buying threshold of all the coins for trading between them
         """
@@ -76,14 +76,14 @@ class AutoTrader:
                     continue
                 self.logger.info(f"Initializing {pair.from_coin} vs {pair.to_coin}")
 
-                from_coin_price = all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
+                from_coin_price = await all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
                 if from_coin_price is None:
                     self.logger.info(
                         "Skipping initializing {}, symbol not found".format(pair.from_coin + self.config.BRIDGE)
                     )
                     continue
 
-                to_coin_price = all_tickers.get_price(pair.to_coin + self.config.BRIDGE)
+                to_coin_price = await all_tickers.get_price(pair.to_coin + self.config.BRIDGE)
                 if to_coin_price is None:
                     self.logger.info(
                         "Skipping initializing {}, symbol not found".format(pair.to_coin + self.config.BRIDGE)
@@ -99,14 +99,14 @@ class AutoTrader:
         """
         raise NotImplementedError()
 
-    def _get_ratios(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> Dict[Pair, float]:
+    async def _get_ratios(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> Dict[Pair, float]:
         """
         Given a coin, get the current price ratio for every other enabled coin
         """
         ratio_dict: Dict[Pair, float] = {}
         scouts = []
-        for pair in self.db.get_pairs_from(coin):
-            optional_coin_price = all_tickers.get_price(pair.to_coin + self.config.BRIDGE)
+        for pair in self.db.get_pairs_from(coin.coin_id):
+            optional_coin_price = await all_tickers.get_price(pair.to_coin + self.config.BRIDGE)
 
             if optional_coin_price is None:
                 self.logger.info(
@@ -124,11 +124,11 @@ class AutoTrader:
         self.db.log_scout(scouts)
         return ratio_dict
 
-    def _jump_to_best_coin(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
+    async def _jump_to_best_coin(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
         """
         Given a coin, search for a coin to jump to
         """
-        ratio_dict = self._get_ratios(coin, coin_price, all_tickers)
+        ratio_dict = await self._get_ratios(coin, coin_price, all_tickers)
 
         # keep only ratios bigger than zero
         ratio_dict = {k: v for k, v in ratio_dict.items() if v > 0}
@@ -137,47 +137,47 @@ class AutoTrader:
         if ratio_dict:
             best_pair = max(ratio_dict, key=ratio_dict.get)
             self.logger.info(f"Will be jumping from {coin} to {best_pair.to_coin_id}")
-            self.transaction_through_bridge(best_pair, all_tickers)
+            await self.transaction_through_bridge(best_pair, all_tickers)
 
-    def bridge_scout(self) -> Optional[Coin]:
+    async def bridge_scout(self) -> Optional[Coin]:
         """
         If we have any bridge coin leftover, buy a coin with it that we won't immediately trade out of
         """
-        bridge_balance = self.manager.get_currency_balance(self.config.BRIDGE.symbol)
-        all_tickers = self.manager.get_all_market_tickers()
+        bridge_balance = await self.manager.get_currency_balance(self.config.BRIDGE.symbol)
+        all_tickers = await self.manager.get_all_market_tickers()
 
         for coin in self.db.get_coins():
-            current_coin_price = all_tickers.get_price(coin + self.config.BRIDGE)
+            current_coin_price = await all_tickers.get_price(coin + self.config.BRIDGE)
 
             if current_coin_price is None:
                 continue
 
-            ratio_dict = self._get_ratios(coin, current_coin_price, all_tickers)
+            ratio_dict = await self._get_ratios(coin, current_coin_price, all_tickers)
             if not any(v > 0 for v in ratio_dict.values()):
                 # There will only be one coin where all the ratios are negative. When we find it, buy it if we can
-                if bridge_balance > self.manager.get_min_notional(coin.symbol, self.config.BRIDGE.symbol):
+                if bridge_balance > await self.manager.get_min_notional(coin.symbol, self.config.BRIDGE.symbol):
                     self.logger.info(f"Will be purchasing {coin} using bridge coin")
-                    self.manager.buy_alt(coin, self.config.BRIDGE, all_tickers)
+                    await self.manager.buy_alt(coin, self.config.BRIDGE, all_tickers)
                     return coin
         return None
 
-    def update_values(self) -> None:
+    async def update_values(self) -> None:
         """
         Log current value state of all altcoin balances against BTC and USDT in DB.
         """
-        all_ticker_values = self.manager.get_all_market_tickers()
+        all_ticker_values = await self.manager.get_all_market_tickers()
+        full_balance = await self.manager.get_full_balance()
 
         now = datetime.now()
 
         session: Session
         with self.db.db_session() as session:
             coins: List[Coin] = session.query(Coin).all()
-            full_balance = self.manager.get_full_balance()
             for coin in coins:
                 balance = full_balance.get(coin.symbol)
                 if balance == 0:
                     continue
-                usd_value = all_ticker_values.get_price(coin + "USDT")
-                btc_value = all_ticker_values.get_price(coin + "BTC")
+                usd_value = await all_ticker_values.get_price(coin + "USDT")
+                btc_value = await all_ticker_values.get_price(coin + "BTC")
                 cv = CoinValue(coin, balance, usd_value, btc_value, datetime=now)
                 session.add(cv)

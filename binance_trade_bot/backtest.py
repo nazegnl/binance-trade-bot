@@ -1,8 +1,9 @@
-import os.path
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from traceback import format_exc
 from typing import Dict, List, Tuple, Union
 
+from binance import AsyncClient
 from sqlitedict import SqliteDict
 
 from .binance_api_manager import AllTickers, BinanceAPIManager
@@ -17,11 +18,16 @@ class FakeAllTickers(AllTickers):  # pylint: disable=too-few-public-methods
     def __init__(self, manager: "MockBinanceManager"):  # pylint: disable=super-init-not-called
         self.manager = manager
 
-    def get_price(self, ticker_symbol):
-        return self.manager.get_market_ticker_price(ticker_symbol)
+    async def get_price(self, ticker_symbol):
+        return await self.manager.get_market_ticker_price(ticker_symbol)
 
 
+@dataclass
 class MockBinanceManager(BinanceAPIManager):
+    cache: SqliteDict
+    datetime: datetime = None
+    balances: Dict[str, float] = None
+
     def __init__(
         self,
         config: Config,
@@ -32,7 +38,6 @@ class MockBinanceManager(BinanceAPIManager):
         start_balances: Dict[str, float] = None,
     ):
         super().__init__(config, db, logger)
-        self.config = config
         self.datetime = start_date or datetime(2021, 1, 1)
         self.balances = start_balances or {config.BRIDGE.symbol: 100}
         self.cache = cache
@@ -49,7 +54,7 @@ class MockBinanceManager(BinanceAPIManager):
     def get_fee(self):
         return 0.00075
 
-    def get_market_ticker_price(self, ticker_symbol: str):
+    async def get_market_ticker_price(self, ticker_symbol: str):
         """
         Get ticker price of a specific coin
         """
@@ -62,7 +67,7 @@ class MockBinanceManager(BinanceAPIManager):
                 end_date = datetime.now()
             end_date = end_date.strftime("%d %b %Y %H:%M:%S")
             self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
-            for result in self.binance_client.get_historical_klines(
+            for result in await self.binance_client.get_historical_klines(
                 ticker_symbol, "1m", target_date, end_date, limit=1000
             ):
                 date = datetime.utcfromtimestamp(result[0] / 1000).strftime("%d %b %Y %H:%M:%S")
@@ -72,22 +77,22 @@ class MockBinanceManager(BinanceAPIManager):
             val = self.cache.get(key, None)
         return val
 
-    def get_full_balance(self):
+    async def get_full_balance(self):
         """
         Get full balance of the current account
         """
         return self.balances
 
-    def buy_alt(
+    async def buy_alt(
         self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers
     ) -> Union[Tuple[bool, None], Tuple[bool, dict]]:
         origin_symbol = origin_coin.symbol
         target_symbol = target_coin.symbol
 
-        target_balance = self.get_currency_balance(target_symbol)
-        from_coin_price = all_tickers.get_price(origin_symbol + target_symbol)
+        target_balance = await self.get_currency_balance(target_symbol)
+        from_coin_price = await all_tickers.get_price(origin_symbol + target_symbol)
 
-        order_quantity = self._buy_quantity(origin_symbol, target_symbol, target_balance, from_coin_price)
+        order_quantity = await self._buy_quantity(origin_symbol, target_symbol, target_balance, from_coin_price)
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] -= target_quantity
         self.balances[origin_symbol] = self.balances.get(origin_symbol, 0) + order_quantity * (1 - self.get_fee())
@@ -97,16 +102,16 @@ class MockBinanceManager(BinanceAPIManager):
         )
         return True, {"price": from_coin_price}
 
-    def sell_alt(
+    async def sell_alt(
         self, origin_coin: Coin, target_coin: Coin, all_tickers: AllTickers
     ) -> Union[Tuple[bool, None], Tuple[bool, dict]]:
         origin_symbol = origin_coin.symbol
         target_symbol = target_coin.symbol
 
-        origin_balance = self.get_currency_balance(origin_symbol)
-        from_coin_price = all_tickers.get_price(origin_symbol + target_symbol)
+        origin_balance = await self.get_currency_balance(origin_symbol)
+        from_coin_price = await all_tickers.get_price(origin_symbol + target_symbol)
 
-        order_quantity = self._sell_quantity(origin_symbol, target_symbol, origin_balance)
+        order_quantity = await self._sell_quantity(origin_symbol, target_symbol, origin_balance)
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] = self.balances.get(target_symbol, 0) + target_quantity * (1 - self.get_fee())
         self.balances[origin_symbol] -= order_quantity
@@ -116,19 +121,19 @@ class MockBinanceManager(BinanceAPIManager):
         )
         return True, {"price": from_coin_price}
 
-    def collate_coins(self, target_symbol: str):
+    async def collate_coins(self, target_symbol: str):
         total = 0
         for coin, balance in self.balances.items():
             if coin == self.config.BRIDGE.symbol:
                 if coin == target_symbol:
                     total += balance
                 else:
-                    price = self.get_market_ticker_price(target_symbol + coin)
+                    price = await self.get_market_ticker_price(target_symbol + coin)
                     if price is None:
                         continue
                     total += balance / price
             else:
-                price = self.get_market_ticker_price(coin + target_symbol)
+                price = await self.get_market_ticker_price(coin + target_symbol)
                 if price is None:
                     continue
                 total += price * balance
@@ -143,7 +148,7 @@ class MockDatabase(Database):
         pass
 
 
-def backtest(
+async def backtest(
     start_date: datetime = None,
     end_date: datetime = None,
     interval=1,
@@ -176,16 +181,16 @@ def backtest(
     manager = MockBinanceManager(config, db, logger, cache, start_date, start_balances)
 
     starting_coin = db.get_coin(starting_coin or config.SUPPORTED_COIN_LIST[0])
-    if not manager.get_currency_balance(starting_coin.symbol):
-        manager.buy_alt(starting_coin, config.BRIDGE, manager.get_all_market_tickers())
+    if not await manager.get_currency_balance(starting_coin.symbol):
+        await manager.buy_alt(starting_coin, config.BRIDGE, manager.get_all_market_tickers())
     db.set_current_coin(starting_coin)
 
     strategy = get_strategy(config.STRATEGY)
     if strategy is None:
         logger.error("Invalid strategy name")
-        return manager
+        return
     trader = strategy(manager, db, logger, config)
-    trader.initialize()
+    await trader.initialize()
 
     yield manager
 
@@ -193,7 +198,7 @@ def backtest(
     try:
         while manager.datetime < end_date:
             try:
-                trader.scout()
+                await trader.scout()
             except Exception:  # pylint: disable=broad-except
                 logger.warning(format_exc())
             manager.increment(interval)
@@ -203,4 +208,4 @@ def backtest(
     except KeyboardInterrupt:
         pass
     cache.close()
-    return manager
+    return

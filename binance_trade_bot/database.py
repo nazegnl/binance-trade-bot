@@ -218,7 +218,7 @@ class Database:
     def create_database(self) -> None:
         Base.metadata.create_all(self.engine)
 
-    def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool) -> TradeLog:
+    def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool):
         return TradeLog(self, from_coin, to_coin, selling)
 
     def migrate_old_state(self) -> None:

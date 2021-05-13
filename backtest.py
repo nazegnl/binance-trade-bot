@@ -1,16 +1,18 @@
 from datetime import datetime
 
+import anyio
 from sqlitedict import SqliteDict
 
 from binance_trade_bot import backtest
 
 cache = SqliteDict("data/backtest_cache.db")
 
-if __name__ == "__main__":
+
+async def main():
     history = []
-    for manager in backtest(datetime(2021, 1, 1), datetime.now()):
-        btc_value = manager.collate_coins("BTC")
-        bridge_value = manager.collate_coins(manager.config.BRIDGE.symbol)
+    async for manager in backtest(datetime(2021, 1, 1), datetime.now()):
+        btc_value = await manager.collate_coins("BTC")
+        bridge_value = await manager.collate_coins(manager.config.BRIDGE.symbol)
         history.append((btc_value, bridge_value))
         btc_diff = round((btc_value - history[0][0]) / history[0][0], 3)
         bridge_diff = round((bridge_value - history[0][1]) / history[0][1], 3)
@@ -20,3 +22,10 @@ if __name__ == "__main__":
         print("BTC VALUE:", btc_value, f"({btc_diff}%)")
         print(f"{manager.config.BRIDGE.symbol} VALUE:", bridge_value, f"({bridge_diff}%)")
         print("------")
+
+
+if __name__ == "__main__":
+    try:
+        anyio.run(main)
+    except (KeyboardInterrupt, SystemExit):
+        pass
