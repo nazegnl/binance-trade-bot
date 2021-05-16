@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from traceback import format_exc
 from typing import Dict, List, Tuple, Union
 
-from binance import AsyncClient
 from sqlitedict import SqliteDict
 
 from .binance_api_manager import AllTickers, BinanceAPIManager
@@ -142,7 +141,7 @@ class MockBinanceManager(BinanceAPIManager):
 
 class MockDatabase(Database):
     def __init__(self, logger: Logger, config: Config):
-        super().__init__(logger, config, "sqlite:///")
+        super().__init__(logger, config)
 
     def log_scout(self, scouts: List[ScoutLog]):
         pass
@@ -171,6 +170,7 @@ async def backtest(
     :return: The final coin balances
     """
     config = config or Config()
+    config.DATABASE_CONNECTION = "sqlite:///"
     logger = Logger("backtesting", enable_notifications=False)
     cache = cache or SqliteDict("data/backtest_cache.db")
     end_date = end_date or datetime.today()

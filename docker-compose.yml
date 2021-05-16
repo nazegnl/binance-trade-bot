@@ -1,41 +1,70 @@
 version: "3"
 
+networks:
+  binance-trader:
+    driver: bridge
+    name: binance-trader
+
 services:
-  crypto-trading:
-    image: edeng23/binance-trade-bot
-    container_name: binance_trader
-    working_dir: /app
-    volumes:
-      - ./user.cfg:/app/user.cfg
-      - ./data:/app/data
-      - ./logs:/app/logs
+  binance-trader:
     command: python -m binance_trade_bot
+    container_name: binance-trader
+    build:
+      context: .
+    depends_on:
+      - postgres
     environment:
       - PYTHONUNBUFFERED=1
-
-  api:
+      - DATABASE_CONNECTION=postgresql://postgres:postgres@postgres/binance-trader
     image: edeng23/binance-trade-bot
-    container_name: binance_trader_api
-    working_dir: /app
+    networks:
+      - binance-trader
     volumes:
       - ./user.cfg:/app/user.cfg
       - ./data:/app/data
       - ./logs:/app/logs
-    ports:
-      - 5123:5123
-    command: gunicorn binance_trade_bot.api_server:app -k eventlet -w 1 --threads 1 -b 0.0.0.0:5123
-    depends_on:
-      - crypto-trading
+    working_dir: /app
 
-  sqlitebrowser:
-    image: ghcr.io/linuxserver/sqlitebrowser
-    container_name: sqlitebrowser
+  postgres:
+    container_name: postgres
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Berlin
-    volumes:
-      - ./data/config:/config
-      - ./data:/data
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=binance-trader
+    image: postgres:alpine
+    networks:
+      - binance-trader
     ports:
-      - 3000:3000
+      - 5432
+    restart: always
+    volumes:
+      - dbvolume:/var/lib/postgresql/data
+
+  pgadmin4:
+    container_name: pgadmin4
+    depends_on:
+      - postgres
+    entrypoint:
+      - /bin/sh
+      - '-c'
+      - /bin/echo 'postgres:5432:*:postgres:postgres' > /tmp/pgpassfile && chmod 600 /tmp/pgpassfile && /entrypoint.sh
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@website.com
+      - PGADMIN_DEFAULT_PASSWORD=SuperSecret
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+    image: dpage/pgadmin4:latest
+    networks:
+      - binance-trader
+    ports:
+      - '19000:80'
+    restart: always
+    volumes:
+      - pgadminvolume:/var/lib/pgadmin
+      - ./pgadmin_servers.json:/pgadmin4/servers.json
+
+volumes:
+  dbvolume:
+    name: dbvolume
+  pgadminvolume:
+    name: pgadminvolume

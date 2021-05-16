@@ -21,10 +21,10 @@ class ScoutLog:
 
 
 class Database:
-    def __init__(self, logger: Logger, config: Config, uri="sqlite:///data/crypto_trading.db") -> None:
+    def __init__(self, logger: Logger, config: Config) -> None:
         self.logger = logger
         self.config = config
-        self.engine = create_engine(uri)
+        self.engine = create_engine(config.DATABASE_CONNECTION)
 
     @contextmanager
     def db_session(self) -> Session:

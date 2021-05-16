@@ -11,3 +11,4 @@ strategy=default
 buy_timeout=0
 sell_timeout=0
 supported_coin_list=ADA ATOM BAT BTT DASH DOGE EOS ETC ICX IOTA NEO OMG ONT QTUM TRX VET XLM XMR
+database_connection=sqlite:///data/crypto_trading.db

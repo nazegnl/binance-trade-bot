@@ -1,7 +1,6 @@
 #!python3
-import os
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .binance_api_manager import BinanceAPIManager
 from .config import Config
@@ -11,7 +10,7 @@ from .maintenance import Maintenance
 from .strategies import get_strategy
 
 
-def main():
+async def main():
     logger = Logger()
     logger.info("Starting")
 
@@ -37,20 +36,17 @@ def main():
     if current_coin:
         logger.info(f"Current coin: {current_coin}")
 
-    maintenance.warmup_cache()
+    await maintenance.warmup_cache()
 
-    trader.initialize()
+    await trader.initialize()
 
-    scheduler = BlockingScheduler()
+    scheduler = AsyncIOScheduler()
     scheduler.add_job(trader.scout, "interval", seconds=config.SCOUT_SLEEP_TIME)
     scheduler.add_job(trader.update_values, "interval", minutes=1)
     scheduler.add_job(db.prune_scout_history, "interval", minutes=1)
     scheduler.add_job(db.prune_value_history, "interval", hours=1)
     scheduler.add_job(maintenance.warmup_cache, "interval", hours=1)
+    scheduler.start()
 
-    print("Press Ctrl+{} to exit".format("Break" if os.name == "nt" else "C"))
 
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        pass
+# TODO: Here we should enter the blocking websocket multiplexer.

@@ -1,10 +1,8 @@
-import dataclasses
 import math
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from aiocache import cached
-from attr import dataclass
 from binance import AsyncClient
 from binance.exceptions import BinanceAPIException
 

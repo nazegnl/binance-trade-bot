@@ -11,15 +11,19 @@ class Maintenance:
         self.database = database
         self.api_manager = api_manager
 
-    def warmup_cache(self) -> None:
+    async def warmup_cache(self) -> None:
         self.logger.debug("Warming up cache")
-        self.api_manager.get_trade_fees()
+        await self.api_manager.get_trade_fees()
 
         for coin in self.database.get_coins():
-            self.api_manager.get_symbol_info(coin + self.config.BRIDGE_SYMBOL)
-            self.api_manager.get_symbol_info(self.config.BRIDGE_SYMBOL + coin)
+            await self.api_manager.get_symbol_info(coin.symbol + self.config.BRIDGE_SYMBOL)
+            await self.api_manager.get_symbol_info(self.config.BRIDGE_SYMBOL + coin.symbol)
 
     def handle_wallet(self) -> None:
         # TODO: Buy bnb
         # TODO: safe guard profit
+        pass
+
+    def update_coin_list(self) -> None:
+        # TODO: Try find correlating coins and update system accordingly
         pass
