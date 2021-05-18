@@ -15,9 +15,9 @@ class Maintenance:
         self.logger.debug("Warming up cache")
         await self.api_manager.get_trade_fees()
 
-        for coin in self.database.get_coins():
-            await self.api_manager.get_symbol_info(coin.symbol + self.config.BRIDGE_SYMBOL)
-            await self.api_manager.get_symbol_info(self.config.BRIDGE_SYMBOL + coin.symbol)
+        for coin in await self.database.get_coins():
+            await self.api_manager.get_symbol_info(coin.symbol, self.config.BRIDGE_SYMBOL)
+            await self.api_manager.get_symbol_info(self.config.BRIDGE_SYMBOL, coin.symbol)
 
     def handle_wallet(self) -> None:
         # TODO: Buy bnb

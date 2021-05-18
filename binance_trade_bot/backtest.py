@@ -176,14 +176,14 @@ async def backtest(
     end_date = end_date or datetime.today()
 
     db = MockDatabase(logger, config)
-    db.create_database()
-    db.set_coins(config.SUPPORTED_COIN_LIST)
+    await db.create_database()
+    await db.set_coins(config.SUPPORTED_COIN_LIST)
     manager = MockBinanceManager(config, db, logger, cache, start_date, start_balances)
 
-    starting_coin = db.get_coin(starting_coin or config.SUPPORTED_COIN_LIST[0])
+    starting_coin = await db.get_coin(starting_coin or config.SUPPORTED_COIN_LIST[0])
     if not await manager.get_currency_balance(starting_coin.symbol):
         await manager.buy_alt(starting_coin, config.BRIDGE, manager.get_all_market_tickers())
-    db.set_current_coin(starting_coin)
+    await db.set_current_coin(starting_coin)
 
     strategy = get_strategy(config.STRATEGY)
     if strategy is None:

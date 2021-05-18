@@ -7,3 +7,5 @@ apscheduler~=3.7.0
 anyio
 aiocache
 psycopg2-binary
+asyncpg
+aiosqlite

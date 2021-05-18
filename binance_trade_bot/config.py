@@ -31,7 +31,7 @@ class Config:  # pylint: disable=too-few-public-methods,too-many-instance-attrib
             config.read(CFG_FL_NAME)
 
         self.BRIDGE_SYMBOL = os.environ.get("BRIDGE_SYMBOL") or config.get(USER_CFG_SECTION, "bridge")
-        self.BRIDGE = Coin(self.BRIDGE_SYMBOL, False)
+        self.BRIDGE = Coin(symbol=self.BRIDGE_SYMBOL, enabled=False)
 
         # Prune settings
         self.SCOUT_HISTORY_PRUNE_TIME = float(

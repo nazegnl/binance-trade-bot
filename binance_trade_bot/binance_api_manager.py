@@ -35,10 +35,17 @@ class BinanceAPIManager:
             self.config.BINANCE_API_KEY, self.config.BINANCE_API_SECRET_KEY, tld=self.config.BINANCE_TLD
         )
 
+    async def init_connection(self):
+        await self.binance_client.ping()
+
+        # calculate timestamp offset between local and binance server
+        res = await self.binance_client.get_server_time()
+        self.binance_client.timestamp_offset = res["serverTime"] - int(time.time() * 1000)
+
     @cached(ttl=43200)
     async def get_trade_fees(self) -> Dict[str, float]:
         fees = await self.retry(self.binance_client.get_trade_fee)
-        return {ticker["symbol"]: ticker["taker"] for ticker in fees["tradeFee"]}
+        return {fee["symbol"]: fee["makerCommission"] for fee in fees}
 
     def get_fee(self) -> float:
         return 0.00075
@@ -132,7 +139,8 @@ class BinanceAPIManager:
                 if order_status["status"] == "PARTIALLY_FILLED" and order_status["side"] == "BUY":
                     self.logger.info("Sell partially filled amount")
 
-                    order_quantity = await self._sell_quantity(origin_symbol, target_symbol)
+                    balance = await self.get_currency_balance(origin_symbol + target_symbol)
+                    order_quantity = await self._sell_quantity(origin_symbol, target_symbol, balance)
                     partially_order = None
                     while partially_order is None:
                         partially_order = await self.retry(
@@ -195,7 +203,7 @@ class BinanceAPIManager:
 
         self.logger.info(f"Buying {order_quantity} of {origin_symbol} with price {from_coin_price:>6.9f}")
 
-        trade_log = self.db.start_trade_log(origin_coin, target_coin, False)
+        trade_log = await self.db.start_trade_log(origin_coin, target_coin, False)
 
         order = await self.retry(
             self.binance_client.order_limit_buy,
@@ -205,21 +213,21 @@ class BinanceAPIManager:
         )
 
         if not order:
-            trade_log.set_failed()
+            await trade_log.set_failed()
             return True, None
 
         self.logger.info(order)
         qty = order["executedQty"]
         if order["status"] != "FILLED":
-            trade_log.set_ordered(origin_balance, target_balance, order_quantity)
+            await trade_log.set_ordered(origin_balance, target_balance, order_quantity)
             stat = await self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
             if stat is None:
-                trade_log.set_canceled()
+                await trade_log.set_canceled()
                 return True, None
             qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Bought {origin_symbol}")
-        trade_log.set_complete(qty)
+        await trade_log.set_complete(qty)
 
         return True, order
 
@@ -250,7 +258,7 @@ class BinanceAPIManager:
             f"Selling {order_quantity} / {origin_balance} of {origin_symbol} with price {from_coin_price:>6.9f}"
         )
 
-        trade_log = self.db.start_trade_log(origin_coin, target_coin, True)
+        trade_log = await self.db.start_trade_log(origin_coin, target_coin, True)
 
         order = await self.retry(
             self.binance_client.order_limit_sell,
@@ -260,22 +268,22 @@ class BinanceAPIManager:
         )
 
         if not order:
-            trade_log.set_failed()
+            await trade_log.set_failed()
             return True, None
 
         self.logger.info(order)
 
         qty = order["executedQty"]
         if order["status"] != "FILLED":
-            trade_log.set_ordered(origin_balance, target_balance, order_quantity)
-            stat = await self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-            if stat is None:
-                trade_log.set_canceled()
+            await trade_log.set_ordered(origin_balance, target_balance, order_quantity)
+            order = await self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if order is None:
+                await trade_log.set_canceled()
                 return True, None
-            qty = stat["cummulativeQuoteQty"]
+            qty = order["cummulativeQuoteQty"]
 
         self.logger.info(f"Sold {origin_symbol}")
 
-        trade_log.set_complete(qty)
+        await trade_log.set_complete(qty)
 
         return True, order

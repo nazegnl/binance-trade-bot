@@ -1,10 +1,10 @@
-import json
-import os
-from contextlib import contextmanager
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Union
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import delete, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Session
 
 from .config import Config
@@ -24,32 +24,33 @@ class Database:
     def __init__(self, logger: Logger, config: Config) -> None:
         self.logger = logger
         self.config = config
-        self.engine = create_engine(config.DATABASE_CONNECTION)
+        self.engine = create_async_engine(config.DATABASE_CONNECTION, future=True)
 
-    @contextmanager
-    def db_session(self) -> Session:
+    @asynccontextmanager
+    async def db_session(self) -> Session:
         """
         Creates a context with an open SQLAlchemy session.
         """
-        session: Session = Session(bind=self.engine)
+        session: AsyncSession = AsyncSession(bind=self.engine, expire_on_commit=False)
 
         try:
             yield session
-            session.commit()
+            await session.commit()
         except:
-            session.rollback()
+            await session.rollback()
             raise
         finally:
-            session.close()
+            await session.close()
 
-    def set_coins(self, symbols: List[str]) -> None:
-        session: Session
+    async def set_coins(self, symbols: List[str]) -> None:
+        session: AsyncSession
 
         # Add coins to the database and set them as enabled or not
-        with self.db_session() as session:
+        async with self.db_session() as session:
             # For all the coins in the database, if the symbol no longer appears
             # in the config file, set the coin as disabled
-            coins: List[Coin] = session.query(Coin).all()
+            result = await session.execute(select(Coin))
+            coins = result.scalars().all()
             for coin in coins:
                 if coin.symbol not in symbols:
                     coin.enabled = False
@@ -64,231 +65,216 @@ class Database:
                     coin.enabled = True
 
         # For all the combinations of coins in the database, add a pair to the database
-        with self.db_session() as session:
-            coins: List[Coin] = session.query(Coin).filter(Coin.enabled).all()
+        async with self.db_session() as session:
+            # TODO: make join query to prevent use of single selects in loop.
+            result = await session.execute(select(Coin).filter(Coin.enabled))
+            coins: List[Coin] = result.scalars().all()
             for from_coin in coins:
                 for to_coin in coins:
                     if from_coin != to_coin:
-                        pair = session.query(Pair).filter(Pair.from_coin == from_coin, Pair.to_coin == to_coin).first()
+
+                        result = await session.execute(
+                            select(Pair).filter(Pair.from_coin == from_coin, Pair.to_coin == to_coin)
+                        )
+                        pair = result.first()
                         if pair is None:
                             session.add(Pair(from_coin, to_coin))
 
-    def get_coins(self, only_enabled=True) -> List[Coin]:
-        session: Session
-        with self.db_session() as session:
+    async def get_coins(self, only_enabled=True) -> List[Coin]:
+        session: AsyncSession
+        async with self.db_session() as session:
+            query = select(Coin)
             if only_enabled:
-                coins = session.query(Coin).filter(Coin.enabled).all()
-            else:
-                coins = session.query(Coin).all()
+                query = query.filter(Coin.enabled)
+
+            result = await session.execute(query)
+            coins = result.scalars().all()
             session.expunge_all()
             return coins
 
-    def get_coin(self, coin: Union[Coin, str]) -> Coin:
+    async def get_coin(self, coin: Union[Coin, str]) -> Coin:
         if isinstance(coin, Coin):
             return coin
-        session: Session
-        with self.db_session() as session:
-            coin = session.query(Coin).get(coin)
-            if coin:
-                session.expunge(coin)
-            return coin
+        session: AsyncSession
+        async with self.db_session() as session:
+            result = await session.get(Coin, coin)
+            if result:
+                session.expunge(result)
+            return result
 
-    def set_current_coin(self, coin: Union[Coin, str]) -> None:
-        coin = self.get_coin(coin)
-        session: Session
-        with self.db_session() as session:
+    async def set_current_coin(self, coin: Union[Coin, str]) -> None:
+        coin = await self.get_coin(coin)
+        session: AsyncSession
+        async with self.db_session() as session:
             if isinstance(coin, Coin):
-                coin = session.merge(coin)
+                coin = await session.merge(coin)
             cc = CurrentCoin(coin)
             session.add(cc)
 
-    def get_current_coin(self) -> Optional[Coin]:
-        session: Session
-        with self.db_session() as session:
-            current_coin = session.query(CurrentCoin).order_by(CurrentCoin.datetime.desc()).first()
+    async def get_current_coin(self) -> Optional[Coin]:
+        session: AsyncSession
+        async with self.db_session() as session:
+            result = await session.execute(select(CurrentCoin).order_by(desc(CurrentCoin.datetime)))
+            current_coin: CurrentCoin = result.scalars().first()
             if current_coin is None:
                 return None
             session.expunge(current_coin)
             return current_coin
 
-    def get_pair(self, from_coin: Union[Coin, str], to_coin: Union[Coin, str]):
-        from_coin = self.get_coin(from_coin)
-        to_coin = self.get_coin(to_coin)
-        session: Session
-        with self.db_session() as session:
-            pair: Pair = session.query(Pair).filter(Pair.from_coin == from_coin, Pair.to_coin == to_coin).first()
+    async def get_pair(self, from_coin: Union[Coin, str], to_coin: Union[Coin, str]):
+        result = await asyncio.gather(self.get_coin(from_coin), self.get_coin(to_coin))
+        session: AsyncSession
+        async with self.db_session() as session:
+            result = await session.execute(select(Pair).filter(Pair.from_coin == result[0], Pair.to_coin == result[1]))
+            pair: Pair = result.first()
             session.expunge(pair)
             return pair
 
-    def get_pairs_from(self, from_coin: Union[Coin, str], only_enabled=True) -> List[Pair]:
-        from_coin = self.get_coin(from_coin)
-        session: Session
-        with self.db_session() as session:
-            pairs = session.query(Pair).filter(Pair.from_coin == from_coin)
+    async def get_pairs_from(self, from_coin: Union[Coin, str], only_enabled=True) -> List[Pair]:
+        from_coin: Coin = await self.get_coin(from_coin)
+        session: AsyncSession
+        async with self.db_session() as session:
+            pairs = select(Pair).filter(Pair.from_coin == from_coin)
             if only_enabled:
                 pairs = pairs.filter(Pair.enabled.is_(True))
-            pairs = pairs.all()
+            result = await session.execute(pairs)
+            pairs = result.scalars().all()
             session.expunge_all()
             return pairs
 
-    def get_pairs(self, only_enabled=True) -> List[Pair]:
-        session: Session
-        with self.db_session() as session:
-            pairs = session.query(Pair)
+    async def get_pairs(self, only_enabled=True) -> List[Pair]:
+        session: AsyncSession
+        async with self.db_session() as session:
+            pairs = select(Pair)
             if only_enabled:
                 pairs = pairs.filter(Pair.enabled.is_(True))
-            pairs = pairs.all()
+            result = await session.execute(pairs)
+            pairs = result.scalars().all()
             session.expunge_all()
             return pairs
 
-    def log_scout(self, scouts: List[ScoutLog]) -> None:
-        session: Session
-        with self.db_session() as session:
+    async def log_scout(self, scouts: List[ScoutLog]) -> None:
+        session: AsyncSession
+        async with self.db_session() as session:
             for log in scouts:
-                merged_pair = session.merge(log.pair)
+                merged_pair = await session.merge(log.pair)
                 sh = ScoutHistory(merged_pair, log.target_ratio, log.current_coin_price, log.other_coin_price)
                 session.add(sh)
 
-    def get_last_sell_trade(self) -> Optional[Trade]:
-        session: Session
-        with self.db_session() as session:
-            previous_sell_trade = (
-                session.query(Trade)
-                .filter(Trade.selling, Trade.state == TradeState.COMPLETE)
-                .order_by(Trade.datetime.desc())
-                .first()
+    async def get_last_sell_trade(self) -> Optional[Trade]:
+        session: AsyncSession
+        async with self.db_session() as session:
+            result = await session.execute(
+                select(Trade).filter(Trade.selling, Trade.state == TradeState.COMPLETE).order_by(desc(Trade.datetime))
             )
+            previous_sell_trade: Trade = result.first()
             if previous_sell_trade is None:
                 return None
             session.expunge(previous_sell_trade)
             return previous_sell_trade
 
-    def prune_scout_history(self) -> None:
-        time_diff = datetime.now() - timedelta(hours=self.config.SCOUT_HISTORY_PRUNE_TIME)
-        session: Session
-        with self.db_session() as session:
-            session.query(ScoutHistory).filter(ScoutHistory.datetime < time_diff).delete()
+    async def prune_scout_history(self) -> None:
+        time_diff: datetime = datetime.now() - timedelta(hours=self.config.SCOUT_HISTORY_PRUNE_TIME)
+        session: AsyncSession
+        async with self.db_session() as session:
+            await session.execute(delete(ScoutHistory).filter(ScoutHistory.datetime < time_diff))
 
-    def prune_value_history(self) -> None:
-        session: Session
-        with self.db_session() as session:
+    async def prune_value_history(self) -> None:
+        session: AsyncSession
+        async with self.db_session() as session:
             # Sets the first entry for each coin for each hour as 'hourly'
-            hourly_entries: List[CoinValue] = (
-                session.query(CoinValue).group_by(CoinValue.coin_id, func.strftime("%H", CoinValue.datetime)).all()
+            result = await session.execute(
+                select(CoinValue).group_by(CoinValue.coin_id, func.strftime("%H", CoinValue.datetime))
             )
+            hourly_entries: List[CoinValue] = result.scalars().all()
             for entry in hourly_entries:
                 entry.interval = Interval.HOURLY
 
             # Sets the first entry for each coin for each day as 'daily'
-            daily_entries: List[CoinValue] = (
-                session.query(CoinValue).group_by(CoinValue.coin_id, func.date(CoinValue.datetime)).all()
-            )
+            result = await session.execute(select(CoinValue).group_by(CoinValue.coin_id, func.date(CoinValue.datetime)))
+            daily_entries: List[CoinValue] = result.scalars().all()
             for entry in daily_entries:
                 entry.interval = Interval.DAILY
 
             # Sets the first entry for each coin for each month as 'weekly'
             # (Sunday is the start of the week)
-            weekly_entries: List[CoinValue] = (
-                session.query(CoinValue).group_by(CoinValue.coin_id, func.strftime("%Y-%W", CoinValue.datetime)).all()
+            result = await session.execute(
+                select(CoinValue).group_by(CoinValue.coin_id, func.strftime("%Y-%W", CoinValue.datetime))
             )
+            weekly_entries: List[CoinValue] = result.scalars().all()
             for entry in weekly_entries:
                 entry.interval = Interval.WEEKLY
 
             # The last 24 hours worth of minutely entries will be kept, so
             # count(coins) * 1440 entries
             time_diff = datetime.now() - timedelta(hours=24)
-            session.query(CoinValue).filter(
-                CoinValue.interval == Interval.MINUTELY, CoinValue.datetime < time_diff
-            ).delete()
+            await session.execute(
+                delete(CoinValue).filter(CoinValue.interval == Interval.MINUTELY, CoinValue.datetime < time_diff)
+            )
 
             # The last 28 days worth of hourly entries will be kept, so count(coins) * 672 entries
             time_diff = datetime.now() - timedelta(days=28)
-            session.query(CoinValue).filter(
-                CoinValue.interval == Interval.HOURLY, CoinValue.datetime < time_diff
-            ).delete()
+            await session.execute(
+                delete(CoinValue).filter(CoinValue.interval == Interval.HOURLY, CoinValue.datetime < time_diff)
+            )
 
             # The last years worth of daily entries will be kept, so count(coins) * 365 entries
             time_diff = datetime.now() - timedelta(days=365)
-            session.query(CoinValue).filter(
-                CoinValue.interval == Interval.DAILY, CoinValue.datetime < time_diff
-            ).delete()
-
+            await session.execute(
+                delete(CoinValue).filter(CoinValue.interval == Interval.DAILY, CoinValue.datetime < time_diff)
+            )
             # All weekly entries will be kept forever
 
-    def create_database(self) -> None:
-        Base.metadata.create_all(self.engine)
+    async def create_database(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
-    def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool):
-        return TradeLog(self, from_coin, to_coin, selling)
-
-    def migrate_old_state(self) -> None:
-        """
-        For migrating from old dotfile format to SQL db. This method should be removed in
-        the future.
-        """
-        if os.path.isfile(".current_coin"):
-            with open(".current_coin") as f:
-                coin = f.read().strip()
-                self.logger.info(f".current_coin file found, loading current coin {coin}")
-                self.set_current_coin(coin)
-            os.rename(".current_coin", ".current_coin.old")
-            self.logger.info(f".current_coin renamed to .current_coin.old - You can now delete this file")
-
-        if os.path.isfile(".current_coin_table"):
-            with open(".current_coin_table") as f:
-                self.logger.info(f".current_coin_table file found, loading into database")
-                table: dict = json.load(f)
-                session: Session
-                with self.db_session() as session:
-                    for from_coin, to_coin_dict in table.items():
-                        for to_coin, ratio in to_coin_dict.items():
-                            if from_coin == to_coin:
-                                continue
-                            pair = session.merge(self.get_pair(from_coin, to_coin))
-                            pair.ratio = ratio
-                            session.add(pair)
-
-            os.rename(".current_coin_table", ".current_coin_table.old")
-            self.logger.info(".current_coin_table renamed to .current_coin_table.old - " "You can now delete this file")
+    async def start_trade_log(self, from_coin: Coin, to_coin: Coin, selling: bool):
+        tradeLog = TradeLog(self)
+        await trade.set_init(from_coin, to_coin, selling)
+        return tradeLog
 
 
 class TradeLog:
-    def __init__(self, db: Database, from_coin: Coin, to_coin: Coin, selling: bool):
+    def __init__(self, db: Database) -> None:
         self.db = db
-        session: Session
-        with self.db.db_session() as session:
-            from_coin = session.merge(from_coin)
-            to_coin = session.merge(to_coin)
+        session: AsyncSession
+        self.trade = None
+
+    async def set_init(self, from_coin: Coin, to_coin: Coin, selling: bool):
+        async with self.db.db_session() as session:
+            from_coin = await session.merge(from_coin)
+            to_coin = await session.merge(to_coin)
             self.trade = Trade(from_coin, to_coin, selling)
             session.add(self.trade)
             # Flush so that SQLAlchemy fills in the id column
             session.flush()
 
-    def set_ordered(self, alt_starting_balance, crypto_starting_balance, alt_trade_amount) -> None:
-        session: Session
-        with self.db.db_session() as session:
-            trade: Trade = session.merge(self.trade)
+    async def set_ordered(self, alt_starting_balance, crypto_starting_balance, alt_trade_amount) -> None:
+        session: AsyncSession
+        async with self.db.db_session() as session:
+            trade: Trade = await session.merge(self.trade)
             trade.alt_starting_balance = alt_starting_balance
             trade.alt_trade_amount = alt_trade_amount
             trade.crypto_starting_balance = crypto_starting_balance
             trade.state = TradeState.ORDERED
 
-    def set_complete(self, crypto_trade_amount) -> None:
-        session: Session
-        with self.db.db_session() as session:
-            trade: Trade = session.merge(self.trade)
+    async def set_complete(self, crypto_trade_amount) -> None:
+        session: AsyncSession
+        async with self.db.db_session() as session:
+            trade: Trade = await session.merge(self.trade)
             trade.crypto_trade_amount = crypto_trade_amount
             trade.price = float(trade.crypto_trade_amount) / float(trade.alt_trade_amount)
             trade.state = TradeState.COMPLETE
 
-    def set_canceled(self) -> None:
-        session: Session
-        with self.db.db_session() as session:
-            trade: Trade = session.merge(self.trade)
+    async def set_canceled(self) -> None:
+        session: AsyncSession
+        async with self.db.db_session() as session:
+            trade: Trade = await session.merge(self.trade)
             trade.state = TradeState.CANCELED
 
-    def set_failed(self) -> None:
-        session: Session
-        with self.db.db_session() as session:
-            trade: Trade = session.merge(self.trade)
+    async def set_failed(self) -> None:
+        session: AsyncSession
+        async with self.db.db_session() as session:
+            trade: Trade = await session.merge(self.trade)
             trade.state = TradeState.FAILED

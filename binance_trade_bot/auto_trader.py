@@ -2,6 +2,7 @@ import abc
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .binance_api_manager import AllTickers, BinanceAPIManager
@@ -33,10 +34,10 @@ class AutoTrader:
         can_buy, buy_order = await self.manager.buy_alt(pair.to_coin, self.config.BRIDGE, all_tickers)
         if can_buy and buy_order is None:
             self.logger.info("Couldn't buy, going back to scouting mode...")
-            self.db.set_current_coin(self.config.BRIDGE)
+            await self.db.set_current_coin(self.config.BRIDGE)
             return None
 
-        self.db.set_current_coin(pair.to_coin)
+        await self.db.set_current_coin(pair.to_coin)
         await self.update_trade_threshold(pair.to_coin, float(buy_order["price"]), all_tickers)
 
         return buy_order
@@ -50,7 +51,7 @@ class AutoTrader:
             self.logger.info("Skipping update... current coin {} not found".format(coin + self.config.BRIDGE))
             return
 
-        session: Session
+        session: AsyncSession
         with self.db.db_session() as session:
             for pair in session.query(Pair).filter(Pair.to_coin == coin):
                 from_coin_price = await all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
@@ -67,14 +68,16 @@ class AutoTrader:
         """
         Initialize the buying threshold of all the coins for trading between them
         """
-        all_tickers = self.manager.get_all_market_tickers()
+        all_tickers = await self.manager.get_all_market_tickers()
 
-        session: Session
-        with self.db.db_session() as session:
-            for pair in session.query(Pair).filter(Pair.ratio.is_(None)).all():
+        session: AsyncSession
+        async with self.db.db_session() as session:
+            result = await session.execute(select(Pair).filter(Pair.ratio.is_(None)))
+            pairs: List[Pair] = result.scalars().all()
+            for pair in pairs:
                 if not pair.from_coin.enabled or not pair.to_coin.enabled:
                     continue
-                self.logger.info(f"Initializing {pair.from_coin} vs {pair.to_coin}")
+                self.logger.info(f"Initializing {pair.from_coin.symbol} vs {pair.to_coin.symbol}")
 
                 from_coin_price = await all_tickers.get_price(pair.from_coin + self.config.BRIDGE)
                 if from_coin_price is None:
@@ -105,7 +108,7 @@ class AutoTrader:
         """
         ratio_dict: Dict[Pair, float] = {}
         scouts = []
-        for pair in self.db.get_pairs_from(coin.coin_id):
+        for pair in await self.db.get_pairs_from(coin.coin_id):
             optional_coin_price = await all_tickers.get_price(pair.to_coin + self.config.BRIDGE)
 
             if optional_coin_price is None:
@@ -121,7 +124,7 @@ class AutoTrader:
 
             ratio_dict[pair] = (coin_opt_coin_ratio - 0.0095 * coin_opt_coin_ratio) - pair.ratio
 
-        self.db.log_scout(scouts)
+        await self.db.log_scout(scouts)
         return ratio_dict
 
     async def _jump_to_best_coin(self, coin: Coin, coin_price: float, all_tickers: AllTickers) -> None:
@@ -146,7 +149,7 @@ class AutoTrader:
         bridge_balance = await self.manager.get_currency_balance(self.config.BRIDGE.symbol)
         all_tickers = await self.manager.get_all_market_tickers()
 
-        for coin in self.db.get_coins():
+        for coin in await self.db.get_coins():
             current_coin_price = await all_tickers.get_price(coin + self.config.BRIDGE)
 
             if current_coin_price is None:
@@ -170,9 +173,9 @@ class AutoTrader:
 
         now = datetime.now()
 
-        session: Session
+        session: AsyncSession
         with self.db.db_session() as session:
-            coins: List[Coin] = session.query(Coin).all()
+            coins: List[Coin] = session.query(Coin).scalars().all()
             for coin in coins:
                 balance = full_balance.get(coin.symbol)
                 if balance == 0:

@@ -17,6 +17,7 @@ async def main():
     config = Config()
     db = Database(logger, config)
     manager = BinanceAPIManager(config, db, logger)
+    await manager.init_connection()
     maintenance = Maintenance(manager, db, config, logger)
 
     strategy = get_strategy(config.STRATEGY)
@@ -27,14 +28,13 @@ async def main():
     logger.info(f"Chosen strategy: {config.STRATEGY}")
 
     logger.info("Creating database schema if it doesn't already exist")
-    db.create_database()
+    await db.create_database()
 
-    db.set_coins(config.SUPPORTED_COIN_LIST)
-    db.migrate_old_state()
+    await db.set_coins(config.SUPPORTED_COIN_LIST)
 
-    current_coin = db.get_current_coin()
+    current_coin = await db.get_current_coin()
     if current_coin:
-        logger.info(f"Current coin: {current_coin}")
+        logger.info(f"Current coin: {current_coin.coin_id}")
 
     await maintenance.warmup_cache()
 

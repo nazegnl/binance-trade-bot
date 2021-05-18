@@ -15,7 +15,7 @@ services:
       - postgres
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_CONNECTION=postgresql://postgres:postgres@postgres/binance-trader
+      - DATABASE_CONNECTION=postgresql+asyncpg://postgres:postgres@postgres/binance-trader
     image: edeng23/binance-trade-bot
     networks:
       - binance-trader
