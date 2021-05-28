@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from traceback import format_exc
 from typing import Dict, List, Tuple, Union
 
-from sqlitedict import SqliteDict
+from diskcache import Cache
 
 from .binance_api_manager import AllTickers, BinanceAPIManager
 from .config import Config
@@ -11,7 +11,7 @@ from .logger import Logger
 from .models import Coin
 from .strategies import get_strategy
 
-cache = SqliteDict("data/backtest_cache.db")
+cache = Cache("data", size_limit=2 ** 30 * 10)
 
 
 class FakeAllTickers(AllTickers):  # pylint: disable=too-few-public-methods
@@ -55,20 +55,23 @@ class MockBinanceManager(BinanceAPIManager):
         target_date = self.datetime.strftime("%d %b %Y %H:%M:%S")
         key = f"{ticker_symbol} - {target_date}"
         val = cache.get(key, None)
+        if val == "Missing":
+            return None
         if val is None:
+            cache.set(key, "Missing")
             end_date = self.datetime + timedelta(minutes=1000)
             if end_date > datetime.now():
                 end_date = datetime.now()
             end_date = end_date.strftime("%d %b %Y %H:%M:%S")
-            self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
             for result in self.binance_client.get_historical_klines(
                 ticker_symbol, "1m", target_date, end_date, limit=1000
             ):
                 date = datetime.utcfromtimestamp(result[0] / 1000).strftime("%d %b %Y %H:%M:%S")
                 price = float(result[1])
-                cache[f"{ticker_symbol} - {date}"] = price
-            cache.commit()
+                cache.set(f"{ticker_symbol} - {date}", price)
             val = cache.get(key, None)
+            if val == "Missing":
+                return None
         return val
 
     def get_full_balance(self):
@@ -90,10 +93,7 @@ class MockBinanceManager(BinanceAPIManager):
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] -= target_quantity
         self.balances[origin_symbol] = self.balances.get(origin_symbol, 0) + order_quantity * (1 - self.get_fee())
-        self.logger.info(
-            f"Bought {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
-            f"{self.balances[target_symbol]}"
-        )
+        self.logger.info(f"Bought {origin_symbol}, at: {self.datetime}, balance now: {self.balances[origin_symbol]}")
         return True, {"price": from_coin_price}
 
     def sell_alt(
@@ -110,8 +110,8 @@ class MockBinanceManager(BinanceAPIManager):
         self.balances[target_symbol] = self.balances.get(target_symbol, 0) + target_quantity * (1 - self.get_fee())
         self.balances[origin_symbol] -= order_quantity
         self.logger.info(
-            f"Sold {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
-            f"{self.balances[target_symbol]}"
+            f"Sold {origin_symbol}, at: {self.datetime}, bridge: {self.balances[target_symbol]} "
+            f"collated value: {self.collate_coins('BTC')}"
         )
         return True, {"price": from_coin_price}
 
@@ -150,6 +150,7 @@ def backtest(
     start_balances: Dict[str, float] = None,
     starting_coin: str = None,
     config: Config = None,
+    logger: Logger = None,
 ):
     """
 
@@ -164,7 +165,7 @@ def backtest(
     :return: The final coin balances
     """
     config = config or Config()
-    logger = Logger("backtesting", enable_notifications=False)
+    logger = logger or Logger("backtesting", enable_notifications=False)
 
     end_date = end_date or datetime.today()
 
@@ -200,5 +201,5 @@ def backtest(
             n += 1
     except KeyboardInterrupt:
         pass
-    cache.close()
+
     return manager
