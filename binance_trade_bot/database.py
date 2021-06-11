@@ -274,12 +274,12 @@ class TradeLog:
             trade.crypto_starting_balance = crypto_starting_balance
             trade.state = TradeState.ORDERED
 
-    def set_complete(self, crypto_trade_amount):
+    def set_complete(self, crypto_trade_amount, price):
         session: Session
         with self.db.db_session() as session:
             trade: Trade = session.merge(self.trade)
             trade.crypto_trade_amount = crypto_trade_amount
-            trade.price = float(trade.crypto_trade_amount) / float(trade.alt_trade_amount)
+            trade.price = price
             trade.state = TradeState.COMPLETE
 
     def set_canceled(self):

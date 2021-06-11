@@ -217,16 +217,15 @@ class BinanceAPIManager:
 
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
         self.logger.info(order)
-        qty = order["executedQty"]
+
         if order["status"] != "FILLED":
-            stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-            if stat is None:
+            order = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if order is None:
                 trade_log.set_canceled()
                 return True, None
-            qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Bought {origin_symbol}")
-        trade_log.set_complete(qty)
+        trade_log.set_complete(order["cummulativeQuoteQty"], order["price"])
 
         return True, order
 
@@ -275,16 +274,14 @@ class BinanceAPIManager:
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
         self.logger.info(order)
 
-        qty = order["executedQty"]
         if order["status"] != "FILLED":
-            stat = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
-            if stat is None:
+            order = self.wait_for_order(origin_symbol, target_symbol, order["orderId"])
+            if order is None:
                 trade_log.set_canceled()
                 return True, None
-            qty = stat["cummulativeQuoteQty"]
 
         self.logger.info(f"Sold {origin_symbol}")
 
-        trade_log.set_complete(qty)
+        trade_log.set_complete(order["cummulativeQuoteQty"], order["price"])
 
         return True, order
